@@ -84,7 +84,7 @@ if [[ "$INIT" = true ]]; then
     echo "Installing Python packages..."
     $PIP_EXEC install --no-cache-dir --upgrade pip setuptools
     $PIP_EXEC uninstall -y numpy
-    $PIP_EXEC install --no-cache-dir "numpy>=2.0.0" pydelatin wandb tqdm opencv-python ipdb pyfqmr flask dill gdown hydra-core imageio[ffmpeg] mujoco mujoco-python-viewer isaacgym-stubs pytorch-kinematics rich termcolor pyyaml
+    $PIP_EXEC install --no-cache-dir "numpy==1.23.0" pydelatin wandb tqdm opencv-python ipdb pyfqmr flask dill gdown hydra-core imageio[ffmpeg] mujoco mujoco-python-viewer isaacgym-stubs pytorch-kinematics rich termcolor pyyaml
     $PIP_EXEC install --no-cache-dir redis[hiredis]
     $PIP_EXEC install --no-cache-dir pyttsx3 # for voice control
 
@@ -128,6 +128,10 @@ else
     conda activate twist
     PYTHON_EXEC=$(conda run -n twist which python)
 fi
+
+# Set LD_LIBRARY_PATH for Isaac Gym to find Python libraries
+CONDA_ENV_PATH=$(conda info --envs | grep twist | awk '{print $NF}')
+export LD_LIBRARY_PATH="$CONDA_ENV_PATH/lib:$LD_LIBRARY_PATH"
 
 #cd to TWIST directory
 cd $HOME/Documents/TWIST
