@@ -42,6 +42,14 @@ from .g1.g1_mimic_distill import G1MimicDistill
 from .g1.g1_mimic_distill_config import G1MimicPrivCfg, G1MimicPrivCfgPPO
 from .g1.g1_mimic_distill_config import G1MimicStuRLCfg, G1MimicStuRLCfgDAgger
 
+from .k1.k1_mimic_config import K1MimicCfg, K1MimicCfgPPO
+from .k1.k1_mimic import K1Mimic
+from .k1.k1_mimic_distill import K1MimicDistill
+from .k1.k1_mimic_distill_config import K1MimicPrivCfg, K1MimicPrivCfgPPO
+from .k1.k1_mimic_distill_config import K1MimicStuRLCfg, K1MimicStuRLCfgDAgger
+#from .k1.k1_simple import K1Simple
+#from .k1.k1_simple_config import K1SimpleCfg, K1SimpleCfgPPO
+
 from legged_gym.gym_utils.task_registry import task_registry
 
 # ======================= environment registration =======================
@@ -52,4 +60,13 @@ task_registry.register("g1_mimic", G1Mimic, G1MimicCfg(), G1MimicCfgPPO())
 task_registry.register("g1_priv_mimic", G1MimicDistill, G1MimicPrivCfg(), G1MimicPrivCfgPPO())
 
 task_registry.register("g1_stu_rl", G1MimicDistill, G1MimicStuRLCfg(), G1MimicStuRLCfgDAgger())
+
+# K1 Robot Tasks
+task_registry.register("k1_mimic", K1Mimic, K1MimicCfg(), K1MimicCfgPPO())
+
+task_registry.register("k1_priv_mimic", K1MimicDistill, K1MimicPrivCfg(), K1MimicPrivCfgPPO())
+
+task_registry.register("k1_stu_rl", K1MimicDistill, K1MimicStuRLCfg(), K1MimicStuRLCfgDAgger())
+
+#task_registry.register("k1_simple", K1Simple, K1SimpleCfg(), K1SimpleCfgPPO())
 

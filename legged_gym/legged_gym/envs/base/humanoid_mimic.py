@@ -377,7 +377,7 @@ class HumanoidMimic(HumanoidChar):
         obs_buf = torch.cat((
                             mimic_obs, # (11 + num_dof) * num_steps
                             self.base_ang_vel  * self.obs_scales.ang_vel,   # 3 dims
-                            imu_obs,    # 3 dims
+                            imu_obs,    # 2 dims (ai says they are not 3 dims)
                             self.reindex((self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos),
                             self.reindex(self.dof_vel * self.obs_scales.dof_vel),
                             self.reindex(self.action_history_buf[:, -1]),

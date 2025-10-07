@@ -911,11 +911,14 @@ class LeggedRobot(BaseTask):
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
         
-        
-        waist_names = self.cfg.asset.waist_name
-        self.waist_indices = torch.zeros(len(waist_names), dtype=torch.long, device=self.device, requires_grad=False)
-        for j in range(len(waist_names)):
-            self.waist_indices[j] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], waist_names[j])
+        #check for none waist robots like k1
+        if hasattr(self.cfg.asset, 'waist_name'):
+            waist_names = self.cfg.asset.waist_name
+            self.waist_indices = torch.zeros(len(waist_names), dtype=torch.long, device=self.device, requires_grad=False)
+            for j in range(len(waist_names)):
+                self.waist_indices[j] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], waist_names[j])
+        else:
+            self.waist_indices = torch.empty(0, dtype=torch.long, device=self.device)
         
         hand_names = self.cfg.asset.hand_name
         self.hand_indices = torch.zeros(len(hand_names), dtype=torch.long, device=self.device, requires_grad=False)

@@ -37,6 +37,7 @@ from legged_gym.gym_utils import get_args, task_registry
 
 import torch
 import wandb
+from legged_gym.utils.wandb_utils import setup_wandb, save_config_files, finish_wandb
 
 def train(args):
     args.headless = True
@@ -47,32 +48,38 @@ def train(args):
     except:
         pass
     
+    # Debug-Mode Einstellungen
     if args.debug:
-        mode = "disabled"
         args.rows = 10
         args.cols = 5
         args.num_envs = 32
         args.headless = False
-    else:
-        mode = "online"
     
-    if args.no_wandb:
-        mode = "disabled"
-        
+    # Robot-Type aus Task-Name extrahieren
     robot_type = args.task.split("_")[0]
     
-    wandb_project = f"{robot_type}_mimic"
-    wandb.init(project=wandb_project, name=args.exptid, mode=mode, dir="../../logs")
-    # wandb.save(LEGGED_GYM_ENVS_DIR + "/base/legged_robot_config.py", policy="now")
-    # wandb.save(LEGGED_GYM_ENVS_DIR + "/base/legged_robot.py", policy="now")
-    # wandb.save(LEGGED_GYM_ENVS_DIR + "/base/humanoid_config.py", policy="now")
-    # wandb.save(LEGGED_GYM_ENVS_DIR + "/base/humanoid.py", policy="now")
-    if robot_type == "g1":
-        wandb.save(LEGGED_GYM_ENVS_DIR + "/g1/g1_mimic_distill_config.py", policy="now")
+    # W&B Setup mit der neuen konfigurierbaren Funktion
+    force_disabled = getattr(args, 'no_wandb', False)
+    wandb_initialized = setup_wandb(
+        project_name="mimic",
+        experiment_id=args.exptid,
+        robot_type=robot_type,
+        force_disabled=force_disabled,
+        debug=args.debug
+    )
+    
+    # Speichere Konfigurationsdateien falls W&B aktiv ist
+    if wandb_initialized:
+        save_config_files(robot_type, LEGGED_GYM_ENVS_DIR)
     
     env, _ = task_registry.make_env(name=args.task, args=args)
     ppo_runner, train_cfg = task_registry.make_alg_runner(log_root=log_pth, env=env, name=args.task, args=args)
-    ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
+    
+    try:
+        ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
+    finally:
+        # Beende W&B ordnungsgemäß
+        finish_wandb()
     
 
 if __name__ == "__main__":

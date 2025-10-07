@@ -1,0 +1,41 @@
+# Weights & Biases (W&B) Konfiguration
+# Tragen Sie hier Ihre W&B Zugangsdaten ein
+
+wandb:
+  # W&B API Key - Erhalten Sie ihn von: https://wandb.ai/authorize
+  # Lassen Sie diesen leer oder kommentieren Sie ihn aus, um W&B zu deaktivieren
+  api_key: ""  # Hier Ihren W&B API Key eintragen
+  
+  # W&B Entity (optional) - Ihr W&B Username oder Team Name
+  entity: ""   # Optional: Ihr W&B Username oder Team Name
+  
+  # Standard Projekt Name (wird durch Roboter-spezifische Namen überschrieben)
+  project: "twist_training"
+  
+  # W&B Mode Optionen:
+  # - "online": Normal logging to W&B servers
+  # - "offline": Log locally and sync later
+  # - "disabled": Disable W&B completely
+  mode: "online"
+  
+  # Verzeichnis für lokale W&B Logs
+  dir: "../../logs"
+  
+  # Weitere W&B Einstellungen
+  settings:
+    # Automatisches Speichern von Code
+    code_save: true
+    
+    # Automatisches Speichern von Git-Info
+    git_save: true
+    
+    # Speichern der Konfigurationsdateien
+    save_config_files: true
+
+# Backup-Einstellungen falls W&B nicht verfügbar ist
+fallback:
+  # Lokales Logging aktivieren wenn W&B nicht verfügbar
+  enable_local_logging: true
+  
+  # Verzeichnis für lokale Logs
+  local_log_dir: "../../logs"
