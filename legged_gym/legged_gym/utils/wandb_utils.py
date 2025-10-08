@@ -1,213 +1,283 @@
-"""
-Weights & Biases (W&B) utility functions for TWIST training
-"""
+"""Weights & Biases (W&B) utility helpers for TWIST training."""
+
+from __future__ import annotations
 
 import os
-import yaml
-import wandb
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Iterable, Mapping, Optional, Sequence
+
+try:  # Optional dependency – handled gracefully when missing
+    import wandb  # type: ignore
+except ImportError:  # pragma: no cover - dependency may be absent in some setups
+    wandb = None  # type: ignore
+
+try:  # Optional dependency for YAML based configuration
+    import yaml  # type: ignore
+except ImportError:  # pragma: no cover - dependency may be absent in some setups
+    yaml = None  # type: ignore
 
 
-def load_wandb_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Loads the W&B configuration from the YAML file.
-    
-    Args:
-        config_path: Path to the configuration file. If None, the default path is used.
-        
-    Returns:
-        Dictionary with the W&B configuration
-    """
-    if config_path is None:
-        # Search for the config file from the current directory
-        current_dir = Path(__file__).parent
-        config_path = current_dir.parent.parent.parent / "config" / "wandb_config.yaml"
-    
-    config_path = Path(config_path)
-    
-    if not config_path.exists():
-        print(f"⚠️  W&B configuration file not found: {config_path}")
-        print("   Using default configuration (W&B disabled)")
-        return get_default_config()
-    
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        return config
-    except Exception as e:
-        print(f"❌ Error loading W&B configuration: {e}")
-        print("   Using default configuration (W&B disabled)")
-        return get_default_config()
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_WANDB_KEY_PATH = _REPO_ROOT / "wandb_key"
+_WANDB_CONFIG_PATH = _REPO_ROOT / "config" / "wandb_config.yaml"
+
+_WANDB_RUN = None
+_WANDB_DISABLED_REASON = "not initialized"
+_WANDB_SAVE_CONFIG = True
 
 
-def get_default_config() -> Dict[str, Any]:
-    """
-    Returns a default configuration if no configuration file is available.
-    """
-    return {
-        'wandb': {
-            'api_key': '',
-            'entity': '',
-            'project': 'twist_training',
-            'mode': 'disabled',
-            'dir': '../../logs',
-            'settings': {
-                'code_save': False,
-                'git_save': False,
-                'save_config_files': False
-            }
+def _resolve_config_path(value: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = (_WANDB_CONFIG_PATH.parent / path).resolve()
+    return path
+
+
+@lru_cache(maxsize=1)
+def _load_wandb_config() -> dict[str, Any]:
+    base_cfg: dict[str, Any] = {
+        "wandb": {
+            "api_key": None,
+            "entity": None,
+            "project": None,
+            "mode": "online",
+            "dir": None,
+            "tags": [],
+            "settings": {
+                "save_config_files": True,
+            },
         },
-        'fallback': {
-            'enable_local_logging': True,
-            'local_log_dir': '../../logs'
-        }
+        "fallback": {},
     }
 
+    if not _WANDB_CONFIG_PATH.exists():
+        return base_cfg
 
-def setup_wandb(project_name: str, 
+    if yaml is None:
+        print("⚠️  PyYAML not installed – using default W&B config")
+        return base_cfg
+
+    try:
+        loaded = yaml.safe_load(_WANDB_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"⚠️  Failed to read W&B config: {exc}")
+        return base_cfg
+
+    if not isinstance(loaded, dict):
+        return base_cfg
+
+    wandb_cfg = loaded.get("wandb")
+    if isinstance(wandb_cfg, dict):
+        merged_settings = dict(base_cfg["wandb"].get("settings", {}))
+        user_settings = wandb_cfg.get("settings")
+        if isinstance(user_settings, dict):
+            merged_settings.update(user_settings)
+
+        merged_cfg = dict(base_cfg["wandb"])
+        merged_cfg.update({k: v for k, v in wandb_cfg.items() if k != "settings"})
+        merged_cfg["settings"] = merged_settings
+        base_cfg["wandb"] = merged_cfg
+
+    fallback_cfg = loaded.get("fallback")
+    if isinstance(fallback_cfg, dict):
+        base_cfg["fallback"] = fallback_cfg
+
+    return base_cfg
+
+
+def read_wandb_key(key_path: Optional[str] = None) -> str:
+    """Return the W&B API key from file, or an empty string when missing."""
+
+    path = Path(key_path) if key_path else _WANDB_KEY_PATH
+    try:
+        key = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        print(f"🔕 W&B key file not found at: {path}")
+        return ""
+    except OSError as exc:  # pragma: no cover - defensive
+        print(f"⚠️  Unable to read W&B key: {exc}")
+        return ""
+
+    if not key:
+        print(f"⚠️  W&B key file at {path} is empty")
+    return key
+
+
+def setup_wandb(project_name: str,
                 experiment_id: str,
-                robot_type: str = 'unknown',
+                robot_type: str = "unknown",
                 force_disabled: bool = False,
                 debug: bool = False) -> bool:
-    """
-    Initializes W&B based on the configuration.
-    
-    Args:
-        project_name: Name of the W&B project
-        experiment_id: Unique ID for this experiment
-        robot_type: Type of robot (g1, k1, t1)
-        force_disabled: Forces the deactivation of W&B
-        debug: Debug mode activated
-        
-    Returns:
-        True if W&B was successfully initialized, False otherwise
-    """
-    config = load_wandb_config()
-    wandb_config = config.get('wandb', {})
-    
-    # Determine the mode
-    mode = wandb_config.get('mode', 'disabled')
-    
-    if force_disabled or debug:
-        mode = 'disabled'
-        print("🔕 W&B was manually disabled")
-    
-    # Check API Key
-    api_key = wandb_config.get('api_key', '').strip()
-    if not api_key and mode != 'disabled':
-        print("⚠️  No W&B API key found in configuration")
-        print("   Add your API key to config/wandb_config.yaml")
-        print("   Or use --no-wandb to disable W&B")
-        mode = 'disabled'
-    
-    # Set API key as environment variable if available
-    if api_key:
-        os.environ['WANDB_API_KEY'] = api_key
-    
-    # Determine project and entity names
-    entity = wandb_config.get('entity', '').strip() or None
-    final_project_name = f"{robot_type}_{project_name}" if robot_type != 'unknown' else project_name
-    
-    try:
-        # Initialize W&B
-        wandb.init(
-            project=final_project_name,
-            name=experiment_id,
-            entity=entity,
-            mode=mode,
-            dir=wandb_config.get('dir', '../../logs'),
-            config={
-                'robot_type': robot_type,
-                'experiment_id': experiment_id,
-            }
-        )
-        
-        if mode != 'disabled':
-            print(f"✅ W&B initialized:")
-            print(f"   Project: {final_project_name}")
-            print(f"   Experiment: {experiment_id}")
-            print(f"   Mode: {mode}")
-            if entity:
-                print(f"   Entity: {entity}")
-        
-        return mode != 'disabled'
-        
-    except Exception as e:
-        print(f"❌ Error during W&B initialization: {e}")
-        print("   Training will continue without W&B")
-        
-        # Fallback: Disable W&B
-        try:
-            wandb.init(mode='disabled')
-        except:
-            pass
-        
+    """Initialise a W&B run based on repository configuration."""
+
+    global _WANDB_RUN, _WANDB_DISABLED_REASON, _WANDB_SAVE_CONFIG
+
+    if _WANDB_RUN is not None:
+        return True
+
+    if force_disabled:
+        _WANDB_DISABLED_REASON = "manual override"
+        print("🔕 W&B disabled via --no-wandb flag")
         return False
 
+    if debug:
+        _WANDB_DISABLED_REASON = "debug mode"
+        print("🔕 W&B disabled in debug mode")
+        return False
 
-def save_config_files(robot_type: str, env_dir: str):
-    """
-    Saves configuration files to W&B if enabled.
-    
-    Args:
-        robot_type: Type of robot (g1, k1, t1)
-        env_dir: Directory with environment configurations
-    """
-    if wandb.run is None or wandb.run.mode == 'disabled':
-        return
-    
-    config = load_wandb_config()
-    if not config.get('wandb', {}).get('settings', {}).get('save_config_files', False):
-        return
-    
+    if wandb is None:
+        _WANDB_DISABLED_REASON = "wandb package not installed"
+        print("⚠️  W&B Python package not available – skipping instrumentation")
+        return False
+
+    config = _load_wandb_config()
+    wandb_cfg: dict[str, Any] = dict(config.get("wandb", {}))
+
+    mode = str(wandb_cfg.get("mode", "online")).lower().strip()
+    if mode == "disabled":
+        _WANDB_DISABLED_REASON = "configuration disables W&B"
+        print("🔕 W&B disabled via config/wandb_config.yaml")
+        return False
+
+    key = str(wandb_cfg.get("api_key") or "").strip() or os.environ.get("WANDB_API_KEY") or read_wandb_key()
+    if key:
+        os.environ.setdefault("WANDB_API_KEY", key)
+    elif mode == "online":
+        _WANDB_DISABLED_REASON = "missing API key"
+        print("� W&B disabled – no API key configured")
+        return False
+
+    project = str(wandb_cfg.get("project") or project_name or "").strip()
+    entity = str(wandb_cfg.get("entity") or "").strip() or None
+
+    dir_value = wandb_cfg.get("dir")
+    run_dir = None
+    if isinstance(dir_value, str) and dir_value.strip():
+        run_dir = _resolve_config_path(dir_value.strip())
+        run_dir.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("WANDB_DIR", str(run_dir))
+
+    tags: set[str] = set()
+    if robot_type and robot_type != "unknown":
+        tags.add(robot_type)
+    user_tags = wandb_cfg.get("tags")
+    if isinstance(user_tags, Sequence):
+        tags.update(str(tag) for tag in user_tags if str(tag).strip())
+
+    init_kwargs: dict[str, Any] = {
+        "project": project or None,
+        "entity": entity,
+        "name": experiment_id,
+        "config": {
+            "robot_type": robot_type,
+            "experiment_id": experiment_id,
+        },
+    }
+
+    if tags:
+        init_kwargs["tags"] = sorted(tags)
+
+    if run_dir is not None:
+        init_kwargs["dir"] = str(run_dir)
+
+    if mode == "offline":
+        init_kwargs["mode"] = "offline"
+
+    init_kwargs = {k: v for k, v in init_kwargs.items() if v is not None}
+
     try:
-        config_file = f"{env_dir}/{robot_type}/{robot_type}_mimic_distill_config.py"
-        if os.path.exists(config_file):
-            wandb.save(config_file, policy="now")
-            print(f"📁 Configuration file saved: {config_file}")
-    except Exception as e:
-        print(f"⚠️  Error saving configuration file: {e}")
+        _WANDB_RUN = wandb.init(**init_kwargs)
+    except Exception as exc:  # pragma: no cover - defensive
+        _WANDB_DISABLED_REASON = f"wandb.init failed: {exc}"
+        print(f"⚠️  Failed to initialise W&B: {exc}")
+        _WANDB_RUN = None
+        return False
+
+    if _WANDB_RUN is None:
+        _WANDB_DISABLED_REASON = "wandb returned None"
+        print("🔕 W&B run not created (check mode setting)")
+        return False
+
+    settings = wandb_cfg.get("settings")
+    _WANDB_SAVE_CONFIG = bool(settings.get("save_config_files", True)) if isinstance(settings, Mapping) else True
+
+    _WANDB_DISABLED_REASON = ""
+    print(f"🚀 W&B run initialised: {project}/{experiment_id}")
+    return True
 
 
-def log_metrics(metrics: Dict[str, Any], step: Optional[int] = None):
-    """
-    Logs metrics to W&B if enabled.
-    
-    Args:
-        metrics: Dictionary with metrics
-        step: Optional step for the time series
-    """
-    if wandb.run is None or wandb.run.mode == 'disabled':
+def _collect_config_candidates(robot_type: str, envs_dir: str | Path) -> Iterable[Path]:
+    env_root = Path(envs_dir)
+    if env_root.is_dir():
+        robot_cfg_dir = env_root / robot_type
+        if robot_cfg_dir.is_dir():
+            for pattern in ("*config*.py", "*.yaml", "*.yml"):
+                yield from robot_cfg_dir.glob(pattern)
+
+    if _WANDB_CONFIG_PATH.exists():
+        yield _WANDB_CONFIG_PATH
+
+
+def save_config_files(robot_type: str, envs_dir: str) -> None:
+    """Upload relevant configuration files to the active W&B run."""
+
+    if wandb is None or _WANDB_RUN is None:
         return
-    
+
+    if not _WANDB_SAVE_CONFIG:
+        return
+
+    artifact = wandb.Artifact(name=f"{robot_type}_configs", type="config")
+    files_added = 0
+
+    for candidate in _collect_config_candidates(robot_type, envs_dir):
+        if candidate.is_file():
+            artifact.add_file(str(candidate))
+            files_added += 1
+
+    if files_added == 0:
+        return
+
     try:
-        if step is not None:
-            wandb.log(metrics, step=step)
-        else:
-            wandb.log(metrics)
-    except Exception as e:
-        print(f"⚠️  Error logging metrics: {e}")
+        _WANDB_RUN.log_artifact(artifact)
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"⚠️  Failed to log config artifact: {exc}")
 
 
-def finish_wandb():
-    """
-    Properly terminates the W&B session.
-    """
+def log_metrics(metrics: Mapping[str, Any], step: Optional[int] = None, commit: bool = True) -> None:
+    """Proxy to ``wandb.log`` when a run is active."""
+
+    if wandb is None or _WANDB_RUN is None:
+        return
+
+    if not isinstance(metrics, Mapping):
+        raise TypeError("metrics must be a mapping of names to values")
+
+    _WANDB_RUN.log(dict(metrics), step=step, commit=commit)
+
+
+def finish_wandb() -> None:
+    """Gracefully close the active W&B run."""
+
+    global _WANDB_RUN
+
+    if wandb is None or _WANDB_RUN is None:
+        return
+
     try:
-        if wandb.run is not None:
-            wandb.finish()
-    except Exception as e:
-        print(f"⚠️  Error terminating W&B: {e}")
+        _WANDB_RUN.finish()
+        print("🏁 W&B run closed")
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"⚠️  Failed to close W&B run: {exc}")
+    finally:
+        _WANDB_RUN = None
 
 
 def get_wandb_status() -> str:
-    """
-    Returns the current W&B status.
-    
-    Returns:
-        String with the status ("disabled", "online", "offline", etc.)
-    """
-    if wandb.run is None:
-        return "not_initialized"
-    return wandb.run.mode
+    """Return human-readable status information about the current W&B run."""
+
+    if _WANDB_RUN is not None:
+        return "running"
+
+    return f"disabled: {_WANDB_DISABLED_REASON}" if _WANDB_DISABLED_REASON else "disabled"
