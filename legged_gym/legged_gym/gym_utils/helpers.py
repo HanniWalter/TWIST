@@ -138,6 +138,12 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.env.record_video = args.record_video
         if args.no_rand:
             env_cfg.domain_rand.domain_rand_general = False
+        if getattr(args, "debug_real_time", False):
+            env_cfg.env.debug_real_time = True
+        if getattr(args, "debug_real_time_verbose", False):
+            env_cfg.env.debug_real_time_verbose = True
+        if getattr(args, "debug_real_time_resync_threshold", None) is not None:
+            env_cfg.env.debug_real_time_resync_threshold = args.debug_real_time_resync_threshold
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed

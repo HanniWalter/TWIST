@@ -46,6 +46,12 @@ class BaseTask():
         self.sim_device = sim_device
         sim_device_type, self.sim_device_id = gymutil.parse_device_str(self.sim_device)
         self.headless = headless
+        self.debug_real_time = getattr(cfg.env, "debug_real_time", False)
+        self.debug_real_time_verbose = getattr(cfg.env, "debug_real_time_verbose", False)
+        self._real_time_resync_threshold = getattr(cfg.env, "debug_real_time_resync_threshold", 0.1)
+        self._real_time_next_tick = None
+        self._real_time_start = None
+        self._sim_time_accum = 0.0
 
         # env device is GPU only if sim is on GPU and use_gpu_pipeline=True, otherwise returned tensors are copied to CPU by physX.
         if sim_device_type=='cuda' and sim_params.use_gpu_pipeline:
@@ -164,6 +170,7 @@ class BaseTask():
                     sys.exit()
                 elif evt.action == "toggle_viewer_sync" and evt.value > 0:
                     self.enable_viewer_sync = not self.enable_viewer_sync
+                    self._reset_real_time_clock()
                 
                 if not self.free_cam:
                     for i in range(9):
@@ -197,12 +204,14 @@ class BaseTask():
                 
                 if evt.action == "pause" and evt.value > 0:
                     self.pause = True
+                    self._reset_real_time_clock()
                     while self.pause:
                         time.sleep(0.1)
                         self.gym.draw_viewer(self.viewer, self.sim, True)
-                        for evt in self.gym.query_viewer_action_events(self.viewer):
-                            if evt.action == "pause" and evt.value > 0:
+                        for pause_evt in self.gym.query_viewer_action_events(self.viewer):
+                            if pause_evt.action == "pause" and pause_evt.value > 0:
                                 self.pause = False
+                                self._reset_real_time_clock()
                         if self.gym.query_viewer_has_closed(self.viewer):
                             sys.exit()
                 if evt.value > 0:
@@ -220,7 +229,7 @@ class BaseTask():
             if self.enable_viewer_sync:
                 self.gym.step_graphics(self.sim)
                 self.gym.draw_viewer(self.viewer, self.sim, True)
-                if sync_frame_time:
+                if sync_frame_time and not self.debug_real_time:
                     self.gym.sync_frame_time(self.sim)
             else:
                 self.gym.poll_viewer_events(self.viewer)
@@ -231,3 +240,45 @@ class BaseTask():
                 look_at_pos = self.root_states[self.lookat_id, :3].clone()
                 self.lookat_vec = cam_trans - look_at_pos
             
+
+    def _reset_real_time_clock(self):
+        self._real_time_next_tick = None
+        self._real_time_start = None
+        self._sim_time_accum = 0.0
+
+    def _sync_real_time(self, duration):
+        if not (self.debug_real_time and self.viewer and self.enable_viewer_sync):
+            return
+
+        now = time.perf_counter()
+
+        if self._real_time_next_tick is None:
+            self._real_time_next_tick = now
+            self._real_time_start = now
+            self._sim_time_accum = 0.0
+
+        self._real_time_next_tick += duration
+        self._sim_time_accum += duration
+
+        sleep_time = self._real_time_next_tick - now
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+            if self.debug_real_time_verbose:
+                wake_drift = time.perf_counter() - self._real_time_next_tick
+                if abs(wake_drift) > 1e-4:
+                    print(f"[RealTime] woke with drift {wake_drift:.6f}s (dt={duration:.6f}s)")
+        else:
+            drift = -sleep_time
+            if self.debug_real_time_verbose:
+                sim_time = self._sim_time_accum
+                real_time = now - self._real_time_start if self._real_time_start is not None else 0.0
+                print(f"[RealTime] behind by {drift:.6f}s (dt={duration:.6f}s, sim={sim_time:.3f}s, real={real_time:.3f}s)")
+            if drift > self._real_time_resync_threshold:
+                if self.debug_real_time_verbose:
+                    print(f"[RealTime] resync clock after drift {drift:.6f}s")
+                now = time.perf_counter()
+                self._real_time_next_tick = now
+                self._real_time_start = now
+                self._sim_time_accum = 0.0
+

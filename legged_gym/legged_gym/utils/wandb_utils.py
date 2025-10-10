@@ -121,11 +121,6 @@ def setup_wandb(project_name: str,
         print("🔕 W&B disabled via --no-wandb flag")
         return False
 
-    if debug:
-        _WANDB_DISABLED_REASON = "debug mode"
-        print("🔕 W&B disabled in debug mode")
-        return False
-
     if wandb is None:
         _WANDB_DISABLED_REASON = "wandb package not installed"
         print("⚠️  W&B Python package not available – skipping instrumentation")
@@ -164,11 +159,14 @@ def setup_wandb(project_name: str,
     user_tags = wandb_cfg.get("tags")
     if isinstance(user_tags, Sequence):
         tags.update(str(tag) for tag in user_tags if str(tag).strip())
-
+    if debug:
+        name = f"debug_/{experiment_id}"
+    else:
+        name = experiment_id
     init_kwargs: dict[str, Any] = {
         "project": project or None,
         "entity": entity,
-        "name": experiment_id,
+        "name": name,
         "config": {
             "robot_type": robot_type,
             "experiment_id": experiment_id,

@@ -52,8 +52,10 @@ def train(args):
     if args.debug:
         args.rows = 10
         args.cols = 5
-        args.num_envs = 32
+        args.num_envs = 1
         args.headless = False
+        args.debug_real_time = True
+        args.debug_real_time_verbose = True
     
     # Robot-Type aus Task-Name extrahieren
     robot_type = args.task.split("_")[0]

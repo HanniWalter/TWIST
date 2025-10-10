@@ -7,7 +7,7 @@ STUDENT=false
 ROBOT="k1"
 NO_WANDB=false
 GMR_DATASET="/home/nao/Documents/trainingsdata/GMR/k1/training_data/"
-
+DEBUG=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -34,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-wandb)
             NO_WANDB=true
+            shift
+            ;;
+        --debug)
+            DEBUG=true
             shift
             ;;
         -h|--help)
@@ -183,6 +187,10 @@ if [[ "$TEACHER" = true ]]; then
         TRAIN_ARGS="${TRAIN_ARGS} --no_wandb"
     fi
     
+    if [[ "$DEBUG" = true ]]; then
+        TRAIN_ARGS="${TRAIN_ARGS} --debug"
+    fi
+
     # Run the training script
     $PYTHON_EXEC train.py $TRAIN_ARGS
                     # Uncomment these for additional options:

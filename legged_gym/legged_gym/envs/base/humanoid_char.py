@@ -127,6 +127,9 @@ class HumanoidChar(LeggedRobot):
             self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
         
+        # Sync once per policy step (after all decimation substeps)
+        self._sync_real_time(self.cfg.control.decimation * self.sim_params.dt)
+        
         self.post_physics_step()
 
         clip_obs = self.cfg.normalization.clip_observations
