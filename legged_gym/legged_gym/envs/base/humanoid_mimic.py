@@ -659,5 +659,8 @@ class HumanoidMimic(HumanoidChar):
         air_time = air_time.clamp(max=0.)
         self.feet_air_time *= ~self.contact_filt
         rew_airtime = air_time.sum(dim=1)
-        rew_airtime *= torch.norm(self._ref_root_vel[:, :2], dim=1) > 0.05
+        speed_mask = torch.norm(self._ref_root_vel[:, :2], dim=1) > 0.05
+        airborne_mask = torch.any(~contact, dim=1)
+        gait_mask = torch.logical_or(speed_mask, airborne_mask).float()
+        rew_airtime *= gait_mask
         return rew_airtime

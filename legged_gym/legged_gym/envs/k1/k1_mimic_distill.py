@@ -3,6 +3,7 @@
 from legged_gym.envs.base.humanoid_mimic import HumanoidMimic
 from legged_gym.gym_utils.task_registry import task_registry
 from legged_gym.envs.k1.k1_mimic_distill_config import K1MimicPrivCfg, K1MimicPrivCfgPPO, K1MimicStuRLCfg, K1MimicStuRLCfgDAgger
+from isaacgym.torch_utils import quat_from_euler_xyz
 
 import torch
 
@@ -60,6 +61,17 @@ class K1MimicDistill(HumanoidMimic):
             else:
                 print(f"[K1MimicDistill] WARNING: '{robot_key_name}' not in motion data! Using fallback index 0")
                 motion_key_indices.append(0)  # Safe fallback
+        
+        # Reinitialize obs_history_buf with correct size for obs_type='priv'
+        if self.cfg.env.obs_type == 'priv':
+            # For teacher: obs includes mimic_obs
+            num_steps = len(self.cfg.env.tar_obs_steps)
+            mimic_obs_dim = num_steps * (3 + 2 + 3 + 1 + self.num_dof)  # 620 for K1
+            obs_buf_dim = mimic_obs_dim + self.cfg.env.n_proprio  # 691 for K1
+            self.obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, obs_buf_dim, 
+                                               dtype=torch.float, device=self.device, requires_grad=False)
+            print(f"[K1MimicDistill] Reinitialized obs_history_buf with shape: {self.obs_history_buf.shape}")
+            print(f"[K1MimicDistill] obs_buf_dim = {obs_buf_dim} (mimic_obs: {mimic_obs_dim} + n_proprio: {self.cfg.env.n_proprio})")
         
         # DIRECTLY override _key_body_ids with motion-compatible indices
         self._key_body_ids = torch.tensor(motion_key_indices, device=self.device, dtype=torch.long)
@@ -130,7 +142,7 @@ class K1MimicDistill(HumanoidMimic):
         root_pos[:, 2] += self.cfg.motion.height_offset
         
         # Handle potential shape mismatch between motion data and robot model
-        print(f"Motion body_pos shape: {body_pos.shape}, ref_body_pos shape: {self._ref_body_pos.shape}")
+        # print(f"Motion body_pos shape: {body_pos.shape}, ref_body_pos shape: {self._ref_body_pos.shape}")
         if body_pos.shape[1] != self._ref_body_pos.shape[1]:
             # Pad or truncate body_pos to match expected dimensions
             expected_bodies = self._ref_body_pos.shape[1]
@@ -171,8 +183,8 @@ class K1MimicDistill(HumanoidMimic):
         self._ref_dof_vel[env_ids] = dof_vel
         
     def _reward_tracking_root_pose(self):
-        """Disabled for debugging CUDA issues."""
-        return torch.zeros(self.num_envs, device=self.device)
+        """Use base humanoid root pose tracking so the metric reflects alignment."""
+        return super()._reward_tracking_root_pose()
         
     def _prepare_reward_function(self):
         """Prepare K1-specific reward functions."""
@@ -180,13 +192,58 @@ class K1MimicDistill(HumanoidMimic):
         
         # K1-specific reward setup can be added here
         
-    def _compute_observations(self):
-        """Compute observations for K1."""
-        obs = super()._compute_observations()
+    def compute_observations(self):
+        """Compute observations for K1 with correct dimensions."""
+        # Call parent to compute base observations
+        imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         
-        # Add any K1-specific observation processing here
+        self.base_yaw_quat = quat_from_euler_xyz(0*self.yaw, 0*self.yaw, self.yaw)
         
-        return obs
+        mimic_obs = self._get_mimic_obs()
+        obs_buf = torch.cat((
+                            mimic_obs, # (11 + num_dof) * num_steps
+                            self.base_ang_vel  * self.obs_scales.ang_vel,   # 3 dims
+                            imu_obs,    # 2 dims
+                            self.reindex((self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos),
+                            self.reindex(self.dof_vel * self.obs_scales.dof_vel),
+                            self.reindex(self.action_history_buf[:, -1]),
+                            ),dim=-1)
+        
+        if self.cfg.noise.add_noise and self.headless:
+            obs_buf += (2 * torch.rand_like(obs_buf) - 1) * self.noise_scale_vec * min(self.total_env_steps_counter / (self.cfg.noise.noise_increasing_steps * 24),  1.)
+        elif self.cfg.noise.add_noise and not self.headless:
+            obs_buf += (2 * torch.rand_like(obs_buf) - 1) * self.noise_scale_vec
+        else:
+            obs_buf += 0.
+
+        if self.cfg.domain_rand.domain_rand_general:
+            priv_latent = torch.cat((
+                self.mass_params_tensor,
+                self.friction_coeffs_tensor,
+                self.motor_strength[0] - 1, 
+                self.motor_strength[1] - 1,
+                self.base_lin_vel,
+            ), dim=-1)
+        else:
+            priv_latent = torch.zeros((self.num_envs, self.cfg.env.n_priv_latent), device=self.device)
+            priv_latent = torch.cat((priv_latent, self.base_lin_vel), dim=-1)
+
+        # For teacher (priv), obs_buf includes mimic_obs, so obs_history should match
+        # Update history buffer with current obs_buf BEFORE concatenating with priv_latent
+        if self.cfg.env.history_len > 0:
+            self.obs_history_buf = torch.where(
+                (self.episode_length_buf <= 1)[:, None, None], 
+                torch.stack([obs_buf] * self.cfg.env.history_len, dim=1),
+                torch.cat([
+                    self.obs_history_buf[:, 1:],
+                    obs_buf.unsqueeze(1)
+                ], dim=1)
+            )
+        
+        # Now concatenate for final observation
+        self.obs_buf = torch.cat([obs_buf, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+        
+        return self.obs_buf
         
     def _compute_rewards(self):
         """Compute rewards for K1."""
@@ -217,12 +274,34 @@ class K1MimicDistill(HumanoidMimic):
         return super()._process_dof_props(props, env_id)
         
     def _get_noise_scale_vec(self, cfg):
-        """Get noise scale vector for K1."""
-        noise_vec = super()._get_noise_scale_vec(cfg)
+        """Get noise scale vector for K1 with correct dimensions."""
+        # Calculate the actual observation size based on obs_type
+        if self.cfg.env.obs_type == 'priv':
+            # For teacher: mimic_obs + proprio
+            num_steps = len(self.cfg.env.tar_obs_steps)
+            mimic_obs_dim = num_steps * (3 + 2 + 3 + 1 + self.num_dof)  # root_pos, roll/pitch, vel, ang_vel_yaw, dof_pos
+            obs_dim = mimic_obs_dim + self.cfg.env.n_proprio
+        else:
+            # For student
+            obs_dim = self.cfg.env.n_proprio
         
-        # K1-specific noise scaling can be added here
+        # Create noise vector with correct size
+        noise_scale_vec = torch.zeros(1, obs_dim, device=self.device)
         
-        return noise_vec
+        if not self.cfg.noise.add_noise:
+            return noise_scale_vec
+        
+        # Only apply noise to the proprio part (last n_proprio elements)
+        noise_start_dim = obs_dim - self.cfg.env.n_proprio
+        ang_vel_dim = 3
+        imu_dim = 2
+        
+        noise_scale_vec[:, noise_start_dim:noise_start_dim+ang_vel_dim] = self.cfg.noise.noise_scales.ang_vel
+        noise_scale_vec[:, noise_start_dim+ang_vel_dim:noise_start_dim+ang_vel_dim+imu_dim] = self.cfg.noise.noise_scales.imu
+        noise_scale_vec[:, noise_start_dim+(ang_vel_dim+imu_dim):noise_start_dim+(ang_vel_dim+imu_dim)+self.num_dof] = self.cfg.noise.noise_scales.dof_pos
+        noise_scale_vec[:, noise_start_dim+(ang_vel_dim+imu_dim)+self.num_dof:noise_start_dim+(ang_vel_dim+imu_dim)+2*self.num_dof] = self.cfg.noise.noise_scales.dof_vel
+        
+        return noise_scale_vec
         
     def _randomize_robot_props(self, env_ids):
         """Randomize robot properties for K1."""
@@ -231,9 +310,12 @@ class K1MimicDistill(HumanoidMimic):
         # K1-specific randomization can be added here
         
     def _reward_ankle_dof_acc(self):
-        """Disabled for debugging."""
-        return torch.zeros(self.num_envs, device=self.device)
+        ankle_dof_idx = [14, 15, 20, 21]  # K1 ankle DOF indices: left ankle_pitch, left ankle_roll, right ankle_pitch, right ankle_roll
+        return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt)[:, ankle_dof_idx], dim=1)
     
     def _reward_ankle_dof_vel(self):
-        """Disabled for debugging."""
-        return torch.zeros(self.num_envs, device=self.device)
+        ankle_dof_idx = [14, 15, 20, 21]  # K1 ankle DOF indices
+        return torch.sum(torch.square(self.dof_vel[:, ankle_dof_idx]), dim=1)
+    
+    def _reward_ankle_action(self):
+        return torch.norm(self.action_history_buf[:, -1, [14, 15, 20, 21]], dim=1)

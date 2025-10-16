@@ -76,7 +76,7 @@ def train(args):
     
     env, _ = task_registry.make_env(name=args.task, args=args)
     ppo_runner, train_cfg = task_registry.make_alg_runner(log_root=log_pth, env=env, name=args.task, args=args)
-    
+    print("ppo_runner type:", type(ppo_runner))
     try:
         ppo_runner.learn(num_learning_iterations=train_cfg.runner.max_iterations, init_at_random_ep_len=True)
     finally:

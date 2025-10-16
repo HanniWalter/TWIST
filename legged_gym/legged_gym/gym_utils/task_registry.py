@@ -135,7 +135,7 @@ class TaskRegistry():
                 print(f"'train_cfg' provided -> Ignoring 'name={name}'")
         # override cfg from args (if specified)
         _, train_cfg = update_cfg_from_args(None, train_cfg, args)
-        
+        print("Train cfg:", train_cfg)
         if log_root=="default":
             log_root = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name)
             log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
@@ -146,6 +146,7 @@ class TaskRegistry():
         
         train_cfg_dict = class_to_dict(train_cfg)
         runner_class = eval(train_cfg.runner.runner_class_name)
+        print("runner class:", runner_class)
         runner = runner_class(env, 
                                 train_cfg_dict, 
                                 log_dir, 

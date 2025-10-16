@@ -4,22 +4,33 @@ from legged_gym.envs.base.humanoid_mimic_config import HumanoidMimicCfg, Humanoi
 from legged_gym import LEGGED_GYM_ROOT_DIR
 
 
+#teacher
 class K1MimicPrivCfg(HumanoidMimicCfg):
     class env(HumanoidMimicCfg.env):
-        tar_obs_steps = [1, 3, 5, 10]
+        tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
         
-        num_envs = 4096
+        num_envs = 1024  # = 5120
         num_actions = 22  # K1 has 22 DOF
-        n_priv = 0
-        n_mimic_obs = 9 + 22  # CORRECTED: 9 base (3+2+3+1) + 22 DOF = 31 total per step
-        # Total: mimic_obs(4*31=124) + base_ang_vel(3) + imu_obs(2) + dof_pos(22) + dof_vel(22) + action_history(22) = 195
-        n_proprio = 195  # FIXED: Direct value to match actual observation size
-        n_priv_latent = 4 + 1 + 2*num_actions
+        obs_type = 'priv'  # 'student'
+        n_priv_latent = 4 + 1 + 2*num_actions  # 49
+        n_priv_latent_with_base_vel = n_priv_latent + 3  # 52: priv_latent + base_lin_vel(3)
         extra_critic_obs = 3
+        n_priv = 0
+        
+        n_proprio = 3 + 2 + 3*num_actions  # 71: base_ang_vel(3) + imu(2) + dof_pos(22) + dof_vel(22) + actions(22)
+        n_priv_mimic_obs = 20 * (8 + 22 + 3*9)  # 20 steps * (8 + num_actions + 3*9 key bodies) = 20 * 57 = 1140 (for student)
+        n_mimic_obs = 3 + 2 + 3 + 1 + 22  # 31: root_pos(3) + roll/pitch(2) + vel(3) + ang_vel_yaw(1) + dof_pos(22)
+        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions  # base lin vel, root height, key body pos, contact mask, priv latent (for student)
         history_len = 10
         
-        num_observations = n_proprio + n_priv_latent + history_len*n_proprio + n_priv + extra_critic_obs 
-        num_privileged_obs = None
+        # For teacher (priv): obs includes mimic_obs from multiple timesteps
+        mimic_obs_dim = 20 * n_mimic_obs  # 20 * 31 = 620
+        n_obs_single = mimic_obs_dim + n_proprio  # 620 + 71 = 691
+        
+        # Total observation with history and priv_latent (note: base_lin_vel is added to priv_latent in code)
+        num_observations = n_obs_single + n_priv_latent_with_base_vel + history_len * n_obs_single  # 691 + 52 + 6910 = 7653
+        num_privileged_obs = num_observations  # Same for teacher
 
         env_spacing = 3.
         send_timeouts = True
@@ -36,22 +47,23 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         enable_early_termination = True
         pose_termination = True
         pose_termination_dist = 0.7
-        root_tracking_termination_dist = 0.8
         rand_reset = True
         track_root = False
         
         # K1 specific DOF error weights (22 DOF) - hands excluded from DOF count
-        dof_err_w = [0.5, 0.5,  # Head: yaw, pitch
+        dof_err_w = [1.0, 0.8, 0.8, 1.0, 0.5, 0.5,  # Left Leg: hip_pitch, hip_roll, hip_yaw, knee_pitch, ankle_pitch, ankle_roll
+                     1.0, 0.8, 0.8, 1.0, 0.5, 0.5,  # Right Leg: hip_pitch, hip_roll, hip_yaw, knee_pitch, ankle_pitch, ankle_roll
+                     0.5, 0.5,  # Head: yaw, pitch
                      1.0, 0.8, 0.8, 1.0,  # Left Arm: shoulder_pitch, shoulder_roll, elbow_pitch, elbow_yaw (no hand)
                      1.0, 0.8, 0.8, 1.0,  # Right Arm: shoulder_pitch, shoulder_roll, elbow_pitch, elbow_yaw (no hand)
-                     1.0, 0.8, 0.8, 1.0, 0.5, 0.5,  # Left Leg: hip_pitch, hip_roll, hip_yaw, knee_pitch, ankle_pitch, ankle_roll
-                     1.0, 0.8, 0.8, 1.0, 0.5, 0.5,  # Right Leg: hip_pitch, hip_roll, hip_yaw, knee_pitch, ankle_pitch, ankle_roll
                      ]
         
         global_obs = False
     
     class terrain(HumanoidMimicCfg.terrain):
         mesh_type = 'trimesh'
+        # mesh_type = 'plane'
+        # height = [0, 0.02]
         height = [0, 0.00]
         horizontal_scale = 0.1
     
@@ -97,6 +109,24 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
     class control(HumanoidMimicCfg.control):
         # K1 motor parameters (optimized for RL training)
         stiffness = {
+            # Hip joints
+            'Left_Hip_Pitch': 100,
+            'Left_Hip_Roll': 100,
+            'Left_Hip_Yaw': 100,
+            'Right_Hip_Pitch': 100,
+            'Right_Hip_Roll': 100,
+            'Right_Hip_Yaw': 100,
+            
+            # Knee joints
+            'Left_Knee_Pitch': 150,
+            'Right_Knee_Pitch': 150,
+            
+            # Ankle joints
+            'Left_Ankle_Pitch': 40,
+            'Left_Ankle_Roll': 40,
+            'Right_Ankle_Pitch': 40,
+            'Right_Ankle_Roll': 40,
+            
             # Head joints
             'AAHead_yaw': 20,
             'Head_pitch': 20,
@@ -116,27 +146,27 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
             # Hand/gripper joints
             'Left_Hand_End_Ball': 10,
             'Right_Hand_End_Ball': 10,
-            
-            # Hip joints
-            'Left_Hip_Pitch': 100,
-            'Left_Hip_Roll': 100,
-            'Left_Hip_Yaw': 100,
-            'Right_Hip_Pitch': 100,
-            'Right_Hip_Roll': 100,
-            'Right_Hip_Yaw': 100,
-            
-            # Knee joints
-            'Left_Knee_Pitch': 150,
-            'Right_Knee_Pitch': 150,
-            
-            # Ankle joints
-            'Left_Ankle_Pitch': 40,
-            'Left_Ankle_Roll': 40,
-            'Right_Ankle_Pitch': 40,
-            'Right_Ankle_Roll': 40,
         }  # [N*m/rad]
         
         damping = {
+            # Hip joints
+            'Left_Hip_Pitch': 2,
+            'Left_Hip_Roll': 2,
+            'Left_Hip_Yaw': 2,
+            'Right_Hip_Pitch': 2,
+            'Right_Hip_Roll': 2,
+            'Right_Hip_Yaw': 2,
+            
+            # Knee joints
+            'Left_Knee_Pitch': 4,
+            'Right_Knee_Pitch': 4,
+            
+            # Ankle joints
+            'Left_Ankle_Pitch': 2,
+            'Left_Ankle_Roll': 2,
+            'Right_Ankle_Pitch': 2,
+            'Right_Ankle_Roll': 2,
+            
             # Head joints
             'AAHead_yaw': 2,
             'Head_pitch': 2,
@@ -156,31 +186,15 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
             # Hand/gripper joints
             'Left_Hand_End_Ball': 1,
             'Right_Hand_End_Ball': 1,
-            
-            # Hip joints
-            'Left_Hip_Pitch': 2,
-            'Left_Hip_Roll': 2,
-            'Left_Hip_Yaw': 2,
-            'Right_Hip_Pitch': 2,
-            'Right_Hip_Roll': 2,
-            'Right_Hip_Yaw': 2,
-            
-            # Knee joints
-            'Left_Knee_Pitch': 4,
-            'Right_Knee_Pitch': 4,
-            
-            # Ankle joints
-            'Left_Ankle_Pitch': 2,
-            'Left_Ankle_Roll': 2,
-            'Right_Ankle_Pitch': 2,
-            'Right_Ankle_Roll': 2,
         }  # [N*m*s/rad]
         
         action_scale = 0.5
         decimation = 10
+        # decimation = 4
         
     class sim(HumanoidMimicCfg.sim):
         dt = 0.002  # 1/500
+        # dt = 1/200 # 0.005
         
     class normalization(HumanoidMimicCfg.normalization):
         clip_actions = 5.0
@@ -203,7 +217,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         feet_bodies = ['left_foot_link', 'right_foot_link']
         n_lower_body_dofs: int = 12  # 6 DOF per leg
 
-        penalize_contacts_on = ["Arm", "Hip", "Link"]  # Avoid contacts on arms, hips, links
+        penalize_contacts_on = ["Arm", "Hip", "Shank"]  # Avoid contacts on arms, hips, links
         terminate_after_contacts_on = ['Trunk']  # Terminate if trunk contacts ground
         
         # K1 motor armature (estimated based on joint types and sizes)
@@ -217,22 +231,38 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
     
     class rewards(HumanoidMimicCfg.rewards):
         regularization_names = [
-            # Can add specific regularization terms here
-        ]
+                        # "feet_stumble",
+                        # "feet_contact_forces",
+                        # "lin_vel_z",
+                        # "ang_vel_xy",
+                        # "orientation",
+                        # "dof_pos_limits",
+                        # "dof_torque_limits",
+                        # "collision",
+                        # "torque_penalty",
+                        # "thigh_torque_roll_yaw",
+                        # "thigh_roll_yaw_acc",
+                        # "dof_acc",
+                        # "dof_vel",
+                        # "action_rate",
+                        ]
         regularization_scale = 1.0
         regularization_scale_range = [0.8,2.0]
         regularization_scale_curriculum = False
         regularization_scale_gamma = 0.0001
-        
         class scales:
             tracking_joint_dof = 0.6
             tracking_joint_vel = 0.2
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
+            # tracking_keybody_pos = 0.6
             tracking_keybody_pos = 2.0
             
+            # alive = 0.5
+
             feet_slip = -0.1
             feet_contact_forces = -5e-4      
+            # collision = -10.0
             feet_stumble = -1.25
             
             dof_pos_limits = -5.0
@@ -242,12 +272,24 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
             dof_acc = -5e-8
             action_rate = -0.01
             
+            # feet_height = 5.0
             feet_air_time = 5.0
-            ang_vel_xy = -0.01
             
-            # K1 specific terms
+            
+            ang_vel_xy = -0.01
+            # orientation = -0.4
+            
+            # base_acc = -5e-7
+            # orientation = -1.0
+            
+            # =========================
+            # waist_dof_acc = -5e-8 * 2
+            # waist_dof_vel = -1e-4 * 2
+            
             ankle_dof_acc = -5e-8 * 2
             ankle_dof_vel = -1e-4 * 2
+            
+            # ankle_action = -0.02
 
         min_dist = 0.1
         max_dist = 0.4
@@ -263,7 +305,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         root_height_diff_threshold = 0.2
 
     class domain_rand:
-        domain_rand_general = True
+        domain_rand_general = True  # manually set this, setting from parser does not work;
         
         randomize_gravity = (True and domain_rand_general)
         gravity_rand_interval_s = 4
@@ -283,6 +325,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         max_push_vel_xy = 1.0
         
         push_end_effector = (True and domain_rand_general)
+        # push_end_effector = False
         push_end_effector_interval_s = 2
         max_push_force_end_effector = 20.0
 
@@ -306,10 +349,8 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
     class motion(HumanoidMimicCfg.motion):
         motion_curriculum = True
         motion_curriculum_gamma = 0.01
-        
-        # K1 key bodies for motion tracking
         key_bodies = ["left_hand_link", "right_hand_link", "left_foot_link", "right_foot_link", 
-                     "Left_Shank", "Right_Shank", "Left_Arm_3", "Right_Arm_3", "Head_2"]
+                     "Left_Shank", "Right_Shank", "Left_Arm_3", "Right_Arm_3", "Head_2"]  # 9 key bodies
         upper_key_bodies = ["left_hand_link", "right_hand_link", "Left_Arm_3", "Right_Arm_3", "Head_2"]
         
         motion_file = f"{LEGGED_GYM_ROOT_DIR}/motion_data_configs/twist_dataset.yaml"
@@ -320,113 +361,205 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
 class K1MimicStuCfg(K1MimicPrivCfg):
     class env(K1MimicPrivCfg.env):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
-                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95]
+                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
+        num_envs = 4
+        num_actions = 22
+        obs_type = 'student'
+        n_priv_latent = 4 + 1 + 2*num_actions
+        extra_critic_obs = 3
+        n_priv = 0
         
-        n_mimic_obs = 8 + 22  # K1 specific
-        n_proprio = len(tar_obs_steps) * n_mimic_obs + 3 + 2 + 3*22
-        n_priv = 0  # Student doesn't use privileged observations
-        n_priv_latent = 0  # Student doesn't use privileged info
-        extra_critic_obs = 0
+        n_proprio = 3 + 2 + 3*num_actions
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
+        n_mimic_obs = 8 + 22 # 22 for dof pos
+        
+        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
-        num_observations = n_proprio + n_priv_latent + history_len*n_proprio + n_priv + extra_critic_obs
+        n_obs_single = n_mimic_obs + n_proprio
+        n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
+        
+        num_observations = n_obs_single * (history_len + 1)
 
+        num_privileged_obs = n_priv_obs_single
 
 class K1MimicStuRLCfg(K1MimicPrivCfg):
     class env(K1MimicPrivCfg.env):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
-                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95]
+                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
         
-        n_mimic_obs = 8 + 22  # K1 specific
-        n_proprio = len(tar_obs_steps) * n_mimic_obs + 3 + 2 + 3*22
-        n_priv = 0  # Student doesn't use privileged observations
-        n_priv_latent = 0  # Student doesn't use privileged info
-        extra_critic_obs = 0
+        num_envs = 16
+        num_actions = 22
+        obs_type = 'student'
+        n_priv_latent = 4 + 1 + 2*num_actions
+        extra_critic_obs = 3
+        n_priv = 0
+        
+        n_proprio = 3 + 2 + 3*num_actions
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
+        n_mimic_obs = 8 + 22 # 22 for dof pos
+        
+        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
-        num_observations = n_proprio + n_priv_latent + history_len*n_proprio + n_priv + extra_critic_obs
+        n_obs_single = n_mimic_obs + n_proprio
+        n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
+        
+        num_observations = n_obs_single * (history_len + 1)
+
+        num_privileged_obs = n_priv_obs_single
+    
+    class rewards(HumanoidMimicCfg.rewards):
+        regularization_names = [
+                        # "feet_stumble",
+                        # "feet_contact_forces",
+                        # "lin_vel_z",
+                        # "ang_vel_xy",
+                        # "orientation",
+                        # "dof_pos_limits",
+                        # "dof_torque_limits",
+                        # "collision",
+                        # "torque_penalty",
+                        # "thigh_torque_roll_yaw",
+                        # "thigh_roll_yaw_acc",
+                        # "dof_acc",
+                        # "dof_vel",
+                        # "action_rate",
+                        ]
+        regularization_scale = 1.0
+        regularization_scale_range = [0.8,2.0]
+        regularization_scale_curriculum = False
+        regularization_scale_gamma = 0.0001
+        class scales:
+            tracking_joint_dof = 0.6
+            tracking_joint_vel = 0.2
+            tracking_root_pose = 0.6
+            tracking_root_vel = 1.0
+            # tracking_keybody_pos = 0.6
+            tracking_keybody_pos = 2.0
+            
+            # alive = 0.5
+
+            feet_slip = -0.1 # higher than teacher
+            feet_contact_forces = -5e-4      
+            # collision = -10.0
+            feet_stumble = -1.25
+            
+            dof_pos_limits = -5.0
+            dof_torque_limits = -1.0
+            
+            dof_vel = -1e-4
+            dof_acc = -5e-8
+            action_rate = -0.01
+            
+            feet_air_time = 5.0
+            
+            
+            ang_vel_xy = -0.01
+            # orientation = -0.4
+            
+            # base_acc = -5e-7
+            # orientation = -1.0
+            
+            # =========================
+            # waist_dof_acc = -5e-8 * 2
+            # waist_dof_vel = -1e-4 * 2
+            
+            ankle_dof_acc = -5e-8 * 2
+            ankle_dof_vel = -1e-4 * 2
+            
+            # ankle_action = -0.02
+            
+
+        min_dist = 0.1
+        max_dist = 0.4
+        max_knee_dist = 0.4
+        feet_height_target = 0.2
+        feet_air_time_target = 0.5
+        only_positive_rewards = False
+        tracking_sigma = 0.2
+        tracking_sigma_ang = 0.125
+        max_contact_force = 100  # Forces above this value are penalized
+        soft_torque_limit = 0.95
+        torque_safety_limit = 0.9
+        root_height_diff_threshold = 0.2
 
 
-# Teacher Policy Configuration (for training privileged policy)
+# Teacher Policy Configurations
 class K1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
-    class policy(HumanoidMimicCfgPPO.policy):
-        init_noise_std = 1.0
-        actor_hidden_dims = [512, 256, 128]
-        critic_hidden_dims = [512, 256, 128]
-        priv_encoder_dims = [64, 20]
-        activation = 'elu'
-        tanh_encoder_output = False
-        fix_action_std = False
-        
-    class algorithm(HumanoidMimicCfgPPO.algorithm):
-        value_loss_coef = 1.0
-        use_clipped_value_loss = True
-        clip_param = 0.2
-        entropy_coef = 0.01
-        num_learning_epochs = 5
-        num_mini_batches = 4
-        learning_rate = 2e-4
-        schedule = 'adaptive'
-        gamma = 0.99
-        lam = 0.95
-        desired_kl = 0.008
-        max_grad_norm = 1.
-        dagger_update_freq = 20
-        priv_reg_coef_schedual = [0, 0.1, 2000, 3000]
-        priv_reg_coef_schedual_resume = [0, 0.1, 0, 1]
-        normalizer_update_iterations = 3000
-
+    seed = 1
     class runner(HumanoidMimicCfgPPO.runner):
-        policy_class_name = 'ActorCritic'
+        policy_class_name = 'ActorCriticMimic'
         algorithm_class_name = 'PPO'
-        runner_class_name = 'OnPolicyRunner'
-        num_steps_per_env = 24
-        max_iterations = 20000
-        save_interval = 100
-        experiment_name = 'k1_priv_mimic'
-        run_name = ''
-        resume = False
-        load_run = -1
-        checkpoint = -1
-        resume_path = None
-        
-        # Teacher-specific settings
-        teacher_policy_class_name = 'TeacherActorCritic'
-        teacher_proj_name = 'k1_priv_mimic'
+        runner_class_name = 'OnPolicyRunnerMimic'
+        max_iterations = 20_002 # number of policy updates
 
+        # logging
+        save_interval = 500 # check for potential saves every this many iterations
+        experiment_name = 'test'
+        run_name = ''
+        # load and resume
+        resume = False
+        load_run = -1 # -1 = last run
+        checkpoint = -1 # -1 = last saved model
+        resume_path = None # updated from load_run and chkpt
+    
+    class algorithm(HumanoidMimicCfgPPO.algorithm):
+        grad_penalty_coef_schedule = [0.00, 0.00, 700, 1000]
+        std_schedule = [1.0, 0.4, 4000, 1500]
+        entropy_coef = 0.005
+        
+        # Transformer params
+        # learning_rate = 1e-4 #1.e-3 #5.e-4
+        # schedule = 'fixed' # could be adaptive, fixed
+    
+    class policy(HumanoidMimicCfgPPO.policy):
+        action_std = [0.7] * 12 + [0.4] * 3 + [0.5] * 8
+        init_noise_std = 1.0
+        obs_context_len = 11
+        actor_hidden_dims = [512, 512, 256, 128]
+        critic_hidden_dims = [512, 512, 256, 128]
+        activation = 'silu'
+        layer_norm = True
+        motion_latent_dim = 128
 
 # Student Policy Configurations
 class K1MimicStuRLCfgDAgger(K1MimicStuRLCfg):
+    seed = 1
+
+    class teachercfg(K1MimicPrivCfgPPO):
+        pass
+
     class algorithm(HumanoidMimicCfgPPO.algorithm):
-        value_loss_coef = 1.0
-        use_clipped_value_loss = True
-        clip_param = 0.2
-        entropy_coef = 0.01
-        num_learning_epochs = 5
-        num_mini_batches = 4
-        learning_rate = 1e-4  # Lower learning rate for student
-        schedule = 'adaptive'
-        gamma = 0.99
-        lam = 0.95
-        desired_kl = 0.008
-        max_grad_norm = 1.
-        dagger_update_freq = 20
+        grad_penalty_coef_schedule = [0.00, 0.00, 700, 1000]
+        std_schedule = [1.0, 0.4, 4000, 1500]
+        entropy_coef = 0.005
         
-        # Student-specific settings
-        bc_loss_coef = 1.0
-        rl_loss_coef = 1.0
-        bc_loss_schedule = [0, 1.0, 4000, 0.1]  # Behavioral cloning schedule
+        dagger_coef_anneal_steps = 60000  # Total steps to anneal dagger_coef to dagger_coef_min
         
-    class runner(HumanoidMimicCfgPPO.runner):
-        policy_class_name = 'StudentActorCritic'
-        algorithm_class_name = 'PPODagger'
-        runner_class_name = 'OnPolicyRunnerDagger'
-        num_steps_per_env = 24
-        max_iterations = 10000  # Fewer iterations for student
-        save_interval = 100
-        experiment_name = 'k1_stu_rl'
+        dagger_coef = 0.1
+        dagger_coef_min = 0.01  # Minimum value for dagger_coef
+        # dagger_coef = 0.0
+        # dagger_coef_min = 0.0  # Minimum value for dagger_coef
+            
+
+    class runner(K1MimicPrivCfgPPO.runner):
+        policy_class_name = 'ActorCriticMimic'
+        algorithm_class_name = 'DaggerPPO'
+        runner_class_name = 'OnPolicyDaggerRunner'
+        max_iterations = 20_001
+        warm_iters = 100
+        
+        # logging
+        save_interval = 500
+        experiment_name = 'test'
         run_name = ''
         resume = False
         load_run = -1
         checkpoint = -1
         resume_path = None
+        
+        teacher_experiment_name = 'test'
+        teacher_proj_name = 'k1_priv_mimic'
+        teacher_checkpoint = -1
+        eval_student = False
