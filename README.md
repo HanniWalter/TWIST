@@ -37,6 +37,8 @@ https://github.com/user-attachments/assets/4953b6de-5c84-4a4b-9391-75818903a654
 
 
 # Installation
+The training can be run on a single Nvidia RTX 4090 with 24G memory in 1~2 days.
+
 **1**. Create conda environment:
 ```bash
 conda env remove -n twist
@@ -158,6 +160,12 @@ python server_high_level_motion_lib.py --motion_file PATH/TO/YOUR/MOTION/FILE --
 - As later we have upgraded to use [GMR](https://github.com/YanjieZe/GMR) for real-time teleop, you can first check [GMR](https://github.com/YanjieZe/GMR) for real-time motion retargeting. After you can successfully run GMR with your MoCap, it would be very easy to modify our provided script to your setting.
 - The teleop script could be further improved. We are preparing to release the new version soon, and this old teleop script will be only used for your reference.
 
+# Q & A
+
+Q: How to use a new retargeted motion pkl file from GMR?  I checked the numpy version and found that TWIST numpy version is 1.23.0, but GMR numpy version is 2.2.6. I guess this version mismatch causes compatibility issues 
+
+A: see [issue#10](https://github.com/YanjieZe/TWIST/issues/10).
+   
 # Contact
 If you have any questions, please contact me at `yanjieze@stanford.edu`.
 
