@@ -5,6 +5,23 @@ import torch
 
 from pose.utils.torch_utils import quat_diff, quat_to_exp_map, slerp
 from tqdm import tqdm
+
+
+import sys
+from types import ModuleType
+import numpy as np
+# Patch sys.modules to fake missing modules from numpy 2.x
+class FakeModule(ModuleType):
+    def __init__(self, name, real=None):
+        super().__init__(name)
+        if real:
+            self.__dict__.update(real.__dict__)
+
+# Patch potentially missing modules
+sys.modules['numpy._core'] = FakeModule('numpy._core', np.core if hasattr(np, 'core') else np)
+sys.modules['numpy._core.multiarray'] = FakeModule('numpy._core.multiarray', getattr(np.core, 'multiarray', None))
+
+
 logger = logging.getLogger(__name__)
 
 def smooth(x, box_pts, device):

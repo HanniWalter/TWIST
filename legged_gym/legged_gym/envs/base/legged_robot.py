@@ -833,12 +833,17 @@ class LeggedRobot(BaseTask):
 
         # save body names from the asset
         body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        print("Body names:", body_names)
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
+        print("DOF names:", self.dof_names)
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
         feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+        print("Feet names:", feet_names)
         self.torso_idx = self.gym.find_asset_rigid_body_index(robot_asset, self.cfg.asset.torso_name)
+        print("Torso index:", self.torso_idx)
         self.chest_idx = self.gym.find_asset_rigid_body_index(robot_asset, self.cfg.asset.chest_name)
+        print("Chest index:", self.chest_idx)
 
         for s in self.cfg.asset.feet_bodies:
             feet_idx = self.gym.find_asset_rigid_body_index(robot_asset, s)
@@ -901,31 +906,38 @@ class LeggedRobot(BaseTask):
             self.friction_coeffs_tensor = self.friction_coeffs.to(self.device).to(torch.float).squeeze(-1)
         
         self.body_names = body_names
+
+        #unused
         self._get_body_indices()
 
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
-        
+        print("Feet indices:", self.feet_indices)
         
         waist_names = self.cfg.asset.waist_name
         self.waist_indices = torch.zeros(len(waist_names), dtype=torch.long, device=self.device, requires_grad=False)
         for j in range(len(waist_names)):
             self.waist_indices[j] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], waist_names[j])
-        
+        print("Waist indices:", self.waist_indices)
+
         hand_names = self.cfg.asset.hand_name
         self.hand_indices = torch.zeros(len(hand_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(hand_names)):
             self.hand_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], hand_names[i])
+        print("Hand indices:", self.hand_indices)
 
         self.penalised_contact_indices = torch.zeros(len(penalized_contact_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(penalized_contact_names)):
             self.penalised_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], penalized_contact_names[i])
+        print("Penalized contact indices:", self.penalised_contact_indices)
 
         self.termination_contact_indices = torch.zeros(len(termination_contact_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(termination_contact_names)):
             self.termination_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], termination_contact_names[i])
-    
+        print("Termination contact indices:", self.termination_contact_indices)
+        #exit()
+
     def _get_body_indices(self):
         """ Store indices of different bodies of the robot
         """

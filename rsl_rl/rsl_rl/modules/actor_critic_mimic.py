@@ -140,7 +140,7 @@ class ActorCriticMimic(nn.Module):
                 layer_norm=False,
                 **kwargs):
         if kwargs:
-            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+            print("ActorCriticMimic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         super().__init__()
 
         self.fix_action_std = fix_action_std

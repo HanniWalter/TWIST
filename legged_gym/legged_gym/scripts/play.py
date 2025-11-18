@@ -85,6 +85,8 @@ def play(args):
         env_cfg.env.episode_length_s = 10
 
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    #ai says this needs to be set
+    #env.enable_viewer_sync = True
     obs = env.get_observations()
 
     # load policy

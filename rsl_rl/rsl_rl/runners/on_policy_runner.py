@@ -379,6 +379,19 @@ class OnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
+
+        #toso check why this is needed ai added it
+        if "student" in self.env.cfg.name or "distill" in self.env.cfg.name:
+            # we are training a student, we don't need to save the normalizer
+            state_dict = {
+            'model_state_dict': self.alg.actor_critic.state_dict(),
+            'optimizer_state_dict': self.alg.optimizer.state_dict(),
+            'iter': self.current_learning_iteration,
+            'infos': infos,
+            }
+            torch.save(state_dict, path)
+            return
+
         if self.normalize_obs:
             state_dict = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
