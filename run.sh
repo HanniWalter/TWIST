@@ -6,6 +6,7 @@ TRAIN_TEACHER=false
 TRAIN_STUDENT=false
 PLAY_TEACHER=false
 PLAY_STUDENT=false
+LIST_LOGS=false
 PROJECT_NAME=""
 EXPTID=""
 TEACHER_EXPTID=""
@@ -14,6 +15,8 @@ NO_WANDB=false
 NO_GMR=false
 GMR_DATASET=""
 DEBUG=false
+RESUME=false
+CHECKPOINT=-1
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -45,6 +48,18 @@ while [[ $# -gt 0 ]]; do
         --play_student)
             PLAY_STUDENT=true
             shift
+            ;;
+        --logs)
+            LIST_LOGS=true
+            shift
+            ;;
+        --resume)
+            RESUME=true
+            shift
+            ;;
+        --checkpoint)
+            CHECKPOINT="$2"
+            shift 2
             ;;
         --exptid)
             EXPTID="$2"
@@ -83,12 +98,21 @@ while [[ $# -gt 0 ]]; do
             echo "  --student     Train the student model"
             echo "  --play_teacher Play/evaluate trained teacher model"
             echo "  --play_student Play/evaluate trained student model"
+            echo "  --logs        List all training runs and checkpoints (use with --robot to filter)"
+            echo "  --resume      Resume training (use with --exptid to specify run, or auto-resume current)"
+            echo "  --checkpoint N Load specific checkpoint number (default: -1 = latest)"
             echo "  --robot ROBOT Specify robot type (k1, g1, t1)"
-            echo "  --exptid ID   Experiment ID for loading trained model (required for play modes)"
+            echo "  --exptid ID   Experiment ID (for resume: g1_teacher_1027_1548, for play: required)"
+            echo "  --teacher_exptid ID Teacher experiment ID (required for student training)"
             echo "  --proj_name NAME  Project name (optional, defaults to robot-specific)"
             echo "  --no-wandb    Disable Weights & Biases logging"
             echo "  --debug       Enable debug mode (small environment, visible)"
             echo "  -h, --help    Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0 --teacher --robot g1                           # Train new G1 teacher"
+            echo "  $0 --teacher --robot g1 --resume --exptid g1_teacher_1027_1548  # Resume specific run"
+            echo "  $0 --logs --robot t1                              # List T1 training runs"
             exit 0
             ;;
         --no-gmr)
@@ -110,6 +134,21 @@ ISSAC_GYM_PATH="$HOME/Documents/isaacgym"
 
 #clean pycache
 find . | grep -E "(/__pycache__$|\.pyc$|\.pyo$)" | xargs rm -rf
+
+# List training logs if requested
+if [[ "$LIST_LOGS" = true ]]; then
+    echo "Listing training runs..."
+    
+    # Build command with optional robot filter
+    LOGS_CMD="python list_runs.py"
+    if [ -n "$ROBOT" ]; then
+        LOGS_CMD="$LOGS_CMD --robot $ROBOT"
+    fi
+    
+    # Execute the command
+    eval $LOGS_CMD
+    exit 0
+fi
 
 # Initialize environment if requested
 if [[ "$INIT" = true ]]; then
@@ -215,9 +254,9 @@ if [ -z "$GMR_DATASET" ]; then
     GMR_DATASET_1="/home/nao/Documents/trainingsdata/GMR/"
     GMR_DATASET_2="/training_data/"
     if [ "$ROBOT" = "t1" ]; then
-        GMR_DATASET="${GMR_DATASET_1}booster_t1_modified${GMR_DATASET_2}"
+        GMR_DATASET="${GMR_DATASET_1}booster_t1_modified_2${GMR_DATASET_2}"
     elif [ "$ROBOT" = "k1" ]; then
-        GMR_DATASET="${GMR_DATASET_1}booster_k1${GMR_DATASET_2}"
+        GMR_DATASET="${GMR_DATASET_1}booster_k1_modified${GMR_DATASET_2}"
     elif [ "$ROBOT" = "g1" ]; then
         GMR_DATASET="${GMR_DATASET_1}unitree_g1_slim${GMR_DATASET_2}"
     else
@@ -264,6 +303,21 @@ if [[ "$TRAIN_TEACHER" = true ]]; then
     fi
 
     echo "Using task: $task_name and project: $proj_name"
+    
+    # Handle resume logic
+    if [[ "$RESUME" = true ]]; then
+        if [ -n "$EXPTID" ]; then
+            echo "Resuming training from run: $EXPTID"
+            exptid="$EXPTID"
+        else
+            echo "Resuming training from last checkpoint of current run"
+        fi
+        echo "Loading checkpoint: $CHECKPOINT (-1 = latest)"
+    elif [ -n "$EXPTID" ]; then
+        # If exptid is provided but not resume, use it as the new experiment name
+        exptid="$EXPTID"
+    fi
+    
     echo "Starting training with exptid: $exptid on device: $device"
     if [[ "$NO_WANDB" = true ]]; then
         echo "W&B logging is disabled"
@@ -271,6 +325,19 @@ if [[ "$TRAIN_TEACHER" = true ]]; then
     
     # Bereite die Trainings-Argumente vor
     TRAIN_ARGS="--task ${task_name} --proj_name ${proj_name} --exptid ${exptid} --device ${device}"
+    
+    # Füge Resume-Parameter hinzu
+    if [[ "$RESUME" = true ]]; then
+        if [ -n "$EXPTID" ]; then
+            TRAIN_ARGS="${TRAIN_ARGS} --resumeid ${EXPTID}"
+        else
+            TRAIN_ARGS="${TRAIN_ARGS} --resume"
+        fi
+        
+        if [ "$CHECKPOINT" != "-1" ]; then
+            TRAIN_ARGS="${TRAIN_ARGS} --checkpoint ${CHECKPOINT}"
+        fi
+    fi
     
     # Füge --no-wandb hinzu falls gesetzt
     if [[ "$NO_WANDB" = true ]]; then
@@ -283,10 +350,6 @@ if [[ "$TRAIN_TEACHER" = true ]]; then
 
     # Run the training script
     $PYTHON_EXEC train.py $TRAIN_ARGS
-                    # Uncomment these for additional options:
-                    # --resume \
-                    # --debug \
-                    # --resumeid xxx
 fi
 
 if [[ "$TRAIN_STUDENT" = true ]]; then
@@ -315,6 +378,21 @@ if [[ "$TRAIN_STUDENT" = true ]]; then
     fi
 
     echo "Using task: $task_name and project: $proj_name"
+    
+    # Handle resume logic
+    if [[ "$RESUME" = true ]]; then
+        if [ -n "$EXPTID" ]; then
+            echo "Resuming training from run: $EXPTID"
+            exptid="$EXPTID"
+        else
+            echo "Resuming training from last checkpoint of current run"
+        fi
+        echo "Loading checkpoint: $CHECKPOINT (-1 = latest)"
+    elif [ -n "$EXPTID" ]; then
+        # If exptid is provided but not resume, use it as the new experiment name
+        exptid="$EXPTID"
+    fi
+    
     echo "Starting training with exptid: $exptid on device: $device"
     if [[ "$NO_WANDB" = true ]]; then
         echo "W&B logging is disabled"
@@ -322,6 +400,19 @@ if [[ "$TRAIN_STUDENT" = true ]]; then
     
     # Bereite die Trainings-Argumente vor
     TRAIN_ARGS="--task ${task_name} --proj_name ${proj_name} --exptid ${exptid} --device ${device} --teacher_exptid ${TEACHER_EXPTID}"
+    
+    # Füge Resume-Parameter hinzu
+    if [[ "$RESUME" = true ]]; then
+        if [ -n "$EXPTID" ]; then
+            TRAIN_ARGS="${TRAIN_ARGS} --resumeid ${EXPTID}"
+        else
+            TRAIN_ARGS="${TRAIN_ARGS} --resume"
+        fi
+        
+        if [ "$CHECKPOINT" != "-1" ]; then
+            TRAIN_ARGS="${TRAIN_ARGS} --checkpoint ${CHECKPOINT}"
+        fi
+    fi
     
     # Füge --no-wandb hinzu falls gesetzt
     if [[ "$NO_WANDB" = true ]]; then
@@ -334,10 +425,6 @@ if [[ "$TRAIN_STUDENT" = true ]]; then
 
     # Run the training script
     $PYTHON_EXEC train.py $TRAIN_ARGS
-                    # Uncomment these for additional options:
-                    # --resume \
-                    # --debug \
-                    # --resumeid xxx
 fi
 
 if [[ "$PLAY_TEACHER" = true ]]; then

@@ -1,0 +1,8 @@
+Booster T1,,,,,,,
+,Gear Ratio,Rated Voltage (V),Rated Torque (Nm),Peak Torque (Nm),Rated Speed (rpm),Peak Speed (rpm),Rotor Inertia (kg·mm²)
+Arm,36,48,10,30,147,167,21.8
+Ankle,36,48,19,57,104,123,26.2
+"Waist, Hip-Roll & Yaw",25,48,13,40,57,70,76.5
+Hip-Pitch,18,48,30,90,140,160,161.7
+Knee,18,48,39,118,120,140,196.3
+Neck,10,48,3,7,120,400,18.0

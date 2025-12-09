@@ -15,6 +15,7 @@ class HumanoidMimicCfg(HumanoidCharCfg):
         global_obs = True
         track_root = True
         dof_err_w = None
+        contact_force_reset_threshold = 1.0
         
 
 class HumanoidMimicCfgPPO(BaseConfig):

@@ -7,7 +7,7 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
         
-        num_envs = 4096
+        num_envs = 4096 * 7 // 8
         num_actions = 21
         obs_type = 'priv' # 'student'
         n_priv_latent = 4 + 1 + 2*num_actions
@@ -15,9 +15,9 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*8) # Hardcode for now: 8 key bodies (see motion.key_bodies)
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*11) # Hardcode for now: 11 key bodies (see motion.key_bodies)
         n_mimic_obs = 8 + 21 # 21 for dof pos
-        n_priv_info = 3 + 1 + 3*8 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, 8 key body pos, contact mask, priv latent
+        n_priv_info = 3 + 1 + 3*11 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, 11 key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
@@ -45,6 +45,7 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         rand_reset = True
         track_root = False
      
+        # TODO: define weights for soccer purposes
         dof_err_w = [0.8, 0.8, 0.8, 1.0, # Left Arm
                      0.8, 0.8, 0.8, 1.0, # Right Arm
                      0.6, # waist
@@ -158,18 +159,18 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         }
         
         action_scale = 1
-        decimation = 5
-        # decimation = 4
+        decimation = 10  # 50 Hz Policy (Target: 50 Hz as per T1 spec)
+        # decimation = 5  # 200 Hz (old)
     
     class sim(HumanoidMimicCfg.sim):
-        dt = 0.001 # 1/100
-        # dt = 1/200 # 0.005
+        dt = 0.002  # 500 Hz Motor (Target: 500 Hz as per T1 spec)
+        # dt = 0.001 # 1000 Hz (old)
         
     class normalization(HumanoidMimicCfg.normalization):
         clip_actions = 5.0
     
     class asset(HumanoidMimicCfg.asset):
-        file = f'{LEGGED_GYM_ROOT_DIR}/../assets/booster_t1/T1_serial_modified.urdf'
+        file = f'{LEGGED_GYM_ROOT_DIR}/../assets/booster_t1/T1_serial_modified_3.urdf'
         
         # for both joint and link name
         #really unsure
@@ -185,7 +186,12 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         lower_arm_name: str = 'hand_link'
         hand_name: list = ['left_hand_tip', 'right_hand_tip']
 
-        feet_bodies = ['left_foot_link', 'right_foot_link']  # exact names for force sensors
+        #left_feet_bodies = ['left_foot_link', 'left_inner_toe_link', 'left_outer_toe_link']
+        #right_feet_bodies = ['right_foot_link', 'right_inner_toe_link', 'right_outer_toe_link']
+        left_feet_bodies = ['left_foot_link']
+        right_feet_bodies = ['right_foot_link']
+
+        feet_bodies = left_feet_bodies + right_feet_bodies # exact names for force sensors
         n_lower_body_dofs: int = 12
         #TODO: weitermachen
 
@@ -194,15 +200,26 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         
         
         # ========================= Inertia =========================
-        # shoulder, elbow, and ankle: 0.139 * 1e-4 * 16**2 + 0.017 * 1e-4 * (46/18 + 1)**2 + 0.169 * 1e-4 = 0.003597
-        # waist, hip pitch & yaw: 0.489 * 1e-4 * 14.3**2 + 0.098 * 1e-4 * 4.5**2 + 0.533 * 1e-4 = 0.0103
-        # knee, hip roll: 0.489 * 1e-4 * 22.5**2 + 0.109 * 1e-4 * 4.5**2 + 0.738 * 1e-4 = 0.0251
-        # wrist: 0.068 * 1e-4 * 25**2 = 0.00425
+        # Reference values from booster (see assets/booster_t1/refernces.txt)
+        # Arms (Shoulder Pitch/Roll, Elbow Pitch/Yaw): 0.0282528
+        # Waist: 0.0478125
+        # Legs - Hip Pitch: 0.0523908, Hip Roll: 0.0478125, Hip Yaw: 0.0478125, Knee Pitch: 0.0636012
+        # Feet (Ankle Pitch/Roll): 0.0339552
         
         # dof_armature for T1: 4 arm joints * 2 + 1 waist + 6 leg joints * 2 = 21 total
-        # dof_armature = [0.003597] * 8 + [0.0103] + [0.0103, 0.0251, 0.0103, 0.0251, 0.003597, 0.003597] * 2
-        
-        dof_armature = [0.0] * 8 + [0.0] + [0.0] * 12
+        # Order: Left arm (4) + Right arm (4) + Waist (1) + Left leg (6) + Right leg (6)
+        dof_armature = [
+            # Left Arm: Shoulder_Pitch, Shoulder_Roll, Elbow_Pitch, Elbow_Yaw
+            0.0282528, 0.0282528, 0.0282528, 0.0282528,
+            # Right Arm: Shoulder_Pitch, Shoulder_Roll, Elbow_Pitch, Elbow_Yaw
+            0.0282528, 0.0282528, 0.0282528, 0.0282528,
+            # Waist
+            0.0478125,
+            # Left Leg: Hip_Pitch, Hip_Roll, Hip_Yaw, Knee_Pitch, Ankle_Pitch, Ankle_Roll
+            0.0523908, 0.0478125, 0.0478125, 0.0636012, 0.0339552, 0.0339552,
+            # Right Leg: Hip_Pitch, Hip_Roll, Hip_Yaw, Knee_Pitch, Ankle_Pitch, Ankle_Roll
+            0.0523908, 0.0478125, 0.0478125, 0.0636012, 0.0339552, 0.0339552,
+        ]
         
         # ========================= Inertia =========================
         
@@ -235,7 +252,7 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.0
+            tracking_keybody_pos = 2.5
             
             # alive = 0.5
 
@@ -248,7 +265,7 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
             dof_torque_limits = -1.0
             
             dof_vel = -1e-4
-            dof_acc = -5e-8
+            dof_acc = -1e-7
             action_rate = -0.01
             
             # feet_height = 5.0
@@ -265,8 +282,11 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
             # waist_dof_acc = -5e-8 * 2
             # waist_dof_vel = -1e-4 * 2
             
-            ankle_dof_acc = -5e-8 * 2
-            ankle_dof_vel = -1e-4 * 2
+            ankle_dof_acc = -1e-7
+            ankle_dof_vel = -2e-4
+            
+            hip_dof_acc = -2e-7
+            hip_dof_vel = -1e-7
             
             # ankle_action = -0.02
             
@@ -279,7 +299,7 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         only_positive_rewards = False
         tracking_sigma = 0.2
         tracking_sigma_ang = 0.125
-        max_contact_force = 100  # Forces above this value are penalized
+        max_contact_force = 500  # Forces above this value are penalized
         soft_torque_limit = 0.95
         torque_safety_limit = 0.9
         root_height_diff_threshold = 0.2
@@ -330,8 +350,8 @@ class T1MimicPrivCfg(HumanoidMimicCfg):
         motion_curriculum = True
         motion_curriculum_gamma = 0.01
         #
-        key_bodies = ["right_hand_tip", "left_hand_tip", "left_foot_link", "right_foot_link","right_toe_link","left_toe_link","Shank_Left","Shank_Right"] # 9 key bodies
-        upper_key_bodies = ["right_hand_tip", "left_hand_tip", "AR3","AL3","H2"]
+        key_bodies = ["right_hand_tip", "left_hand_tip", "left_foot_link", "right_foot_link","right_outer_toe_link","left_outer_toe_link","right_inner_toe_link","left_inner_toe_link","Hip_Pitch_Right","Hip_Pitch_Left", "H2"] # 11 key bodies
+        upper_key_bodies = ["right_hand_tip", "left_hand_tip", "H2"] #["right_hand_tip", "left_hand_tip", "AR3","AL3","H2"]
         
         motion_file = f"{LEGGED_GYM_ROOT_DIR}/motion_data_configs/twist_dataset.yaml"
         
@@ -343,7 +363,7 @@ class T1MimicStuCfg(T1MimicPrivCfg):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
         
-        num_envs = 4096
+        num_envs = 4096 * 7 // 8
         num_actions = 21
         obs_type = 'student'
         n_priv_latent = 4 + 1 + 2*num_actions
@@ -351,10 +371,10 @@ class T1MimicStuCfg(T1MimicPrivCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*8) # Hardcode for now: 8 key bodies (see motion.key_bodies)
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*11) # Hardcode for now: 11 key bodies (see motion.key_bodies)
         n_mimic_obs = 8 + 21 # 21 for dof pos
         
-        n_priv_info = 3 + 1 + 3*8 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, 8 key body pos, contact mask, priv latent
+        n_priv_info = 3 + 1 + 3*11 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, 11 key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_mimic_obs + n_proprio
@@ -369,7 +389,7 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
         
-        num_envs = 4096
+        num_envs = 4096 * 7 // 8
         num_actions = 21
         obs_type = 'student'
         n_priv_latent = 4 + 1 + 2*num_actions
@@ -377,10 +397,10 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*8) # Hardcode for now: 8 key bodies (see motion.key_bodies)
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*11) # Hardcode for now: 11 key bodies (see motion.key_bodies)
         n_mimic_obs = 8 + 21 # 21 for dof pos
         
-        n_priv_info = 3 + 1 + 3*8 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, 8 key body pos, contact mask, priv latent
+        n_priv_info = 3 + 1 + 3*11 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, 11 key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_mimic_obs + n_proprio
@@ -393,7 +413,7 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
     class rewards(HumanoidMimicCfg.rewards):
         regularization_names = [
                         # "feet_stumble",
-                        # "feet_contact_forces",
+                        # "feet_contact_forces", 
                         # "lin_vel_z",
                         # "ang_vel_xy",
                         # "orientation",
@@ -417,11 +437,11 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.0
+            tracking_keybody_pos = 2.5
             
             # alive = 0.5
 
-            feet_slip = -0.1 # higher than teacher
+            feet_slip = -0.1 # same as teacher now
             feet_contact_forces = -5e-4      
             # collision = -10.0
             feet_stumble = -1.25
@@ -430,7 +450,7 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
             dof_torque_limits = -1.0
             
             dof_vel = -1e-4
-            dof_acc = -5e-8
+            dof_acc = -1e-7
             action_rate = -0.01
             
             feet_air_time = 5.0
@@ -446,8 +466,11 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
             # waist_dof_acc = -5e-8 * 2
             # waist_dof_vel = -1e-4 * 2
             
-            ankle_dof_acc = -5e-8 * 2
-            ankle_dof_vel = -1e-4 * 2
+            ankle_dof_acc = -1e-7
+            ankle_dof_vel = -2e-4
+            
+            hip_dof_acc = -2e-7
+            hip_dof_vel = -1e-7
             
             # ankle_action = -0.02
             
@@ -460,7 +483,7 @@ class T1MimicStuRLCfg(T1MimicPrivCfg):
         only_positive_rewards = False
         tracking_sigma = 0.2
         tracking_sigma_ang = 0.125
-        max_contact_force = 100  # Forces above this value are penalized
+        max_contact_force = 500  # Forces above this value are penalized
         soft_torque_limit = 0.95
         torque_safety_limit = 0.9
         root_height_diff_threshold = 0.2
@@ -471,7 +494,7 @@ class T1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
         policy_class_name = 'ActorCriticMimic'
         algorithm_class_name = 'PPO'
         runner_class_name = 'OnPolicyRunnerMimic'
-        max_iterations = 20_002 # number of policy updates
+        max_iterations = 30_002 # number of policy updates
 
         # logging
         save_interval = 500 # check for potential saves every this many iterations

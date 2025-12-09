@@ -62,6 +62,31 @@ class HumanoidMimic(HumanoidChar):
         super()._init_buffers()
         self._init_motion_buffers()
         
+        # Group feet for logical rewards (Left/Right)
+        self.left_foot_indices_local = []
+        self.right_foot_indices_local = []
+        
+        if hasattr(self.cfg.asset, 'left_feet_bodies') and hasattr(self.cfg.asset, 'right_feet_bodies'):
+            num_left = len(self.cfg.asset.left_feet_bodies)
+            num_right = len(self.cfg.asset.right_feet_bodies)
+            self.left_foot_indices_local = list(range(num_left))
+            self.right_foot_indices_local = list(range(num_left, num_left + num_right))
+        else:
+            # feet_indices contains global body indices
+            for i, body_idx in enumerate(self.feet_indices):
+                body_name = self.body_names[body_idx.item()].lower()
+                if "left" in body_name:
+                    self.left_foot_indices_local.append(i)
+                elif "right" in body_name:
+                    self.right_foot_indices_local.append(i)
+                
+        self.left_foot_indices_local = torch.tensor(self.left_foot_indices_local, device=self.device, dtype=torch.long)
+        self.right_foot_indices_local = torch.tensor(self.right_foot_indices_local, device=self.device, dtype=torch.long)
+        
+        self.logical_feet_air_time = torch.zeros(self.num_envs, 2, device=self.device)
+        self.last_logical_contacts = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self.device)
+
+        
     def _load_motions(self):
         self._motion_lib = MotionLib(motion_file=self.cfg.motion.motion_file, device=self.device)
         return
@@ -273,64 +298,64 @@ class HumanoidMimic(HumanoidChar):
             self._push_end_effector()
             
     def check_termination(self):
-        contact_force_termination = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
-        self.reset_buf = contact_force_termination
-        
-        # height_cutoff = self.root_states[:, 2] < self.cfg.rewards.termination_height
-        height_cutoff = torch.abs(self.root_states[:, 2] - self._ref_root_pos[:, 2]) > self.cfg.rewards.root_height_diff_threshold
+        if self.termination_contact_indices.numel() > 0:
+            threshold = self.cfg.env.contact_force_reset_threshold
+            contact_norms = torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1)
+            contact_force_termination = torch.any(contact_norms > threshold, dim=1)
+        else:
+            contact_force_termination = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+        self.reset_buf = contact_force_termination
+
+        height_cutoff = torch.abs(self.root_states[:, 2] - self._ref_root_pos[:, 2]) > self.cfg.rewards.root_height_diff_threshold
         roll_cut = torch.abs(self.roll) > self.cfg.rewards.termination_roll
         pitch_cut = torch.abs(self.pitch) > self.cfg.rewards.termination_pitch
-        self.reset_buf |= roll_cut
-        self.reset_buf |= pitch_cut
+        orientation_cut = roll_cut | pitch_cut
         motion_end = self.episode_length_buf * self.dt >= self._motion_lib.get_motion_length(self._motion_ids)
+
         self.reset_buf |= height_cutoff
-        
+        self.reset_buf |= orientation_cut
+
         if self.viewer is None:
             self.reset_buf |= motion_end
-        
+
         self.time_out_buf = self.episode_length_buf > self.max_episode_length
         if self.viewer is None:
             self.time_out_buf |= motion_end
-        
+
         self.reset_buf |= self.time_out_buf
-        
+
         vel_too_large = torch.norm(self.root_states[:, 7:10], dim=-1) > 5.
         self.reset_buf |= vel_too_large
-        
+
+        pose_fail = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        root_pos_fail = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if self._pose_termination:
             body_pos = self.rigid_body_states[:, self._key_body_ids, 0:3] - self.rigid_body_states[:, 0:1, 0:3]
-            tar_body_pos = self._ref_body_pos[:, self._key_body_ids] - self._ref_root_pos[:, None, :] 
-            
+            tar_body_pos = self._ref_body_pos[:, self._key_body_ids] - self._ref_root_pos[:, None, :]
+
             if not self.global_obs:
                 body_pos = convert_to_local_root_body_pos(self.root_states[:, 3:7], body_pos)
                 tar_body_pos = convert_to_local_root_body_pos(self._ref_root_rot, tar_body_pos)
-            
-            body_pos_diff = tar_body_pos - body_pos # (envs, bodies, 3)
-            body_pos_dist = torch.sum(body_pos_diff * body_pos_diff, dim=-1) # (envs, bodies)
-            body_pos_dist = torch.max(body_pos_dist, dim=-1)[0] # (envs)
-            # if lose tracking for 50 frames continuously, reset (corresponds to 1 second)
-            # lose_tracking = body_pos_dist > self.motion_termination_dist[self._motion_ids] ** 2
-            # self.deviate_tracking_frames[lose_tracking] += 1
-            # self.deviate_tracking_frames[~lose_tracking] = 0
-            # pose_fail = self.deviate_tracking_frames >= self.cfg.motion.reset_consec_frames # 50 frames = 1 second
-            
+
+            body_pos_diff = tar_body_pos - body_pos
+            body_pos_dist = torch.sum(body_pos_diff * body_pos_diff, dim=-1)
+            body_pos_dist = torch.max(body_pos_dist, dim=-1)[0]
+
             pose_fail = body_pos_dist > self._pose_termination_dist ** 2
-            
-            # pose_fail = body_pos_dist > self.motion_termination_dist[self._motion_ids] ** 2
-            
+
             if self._track_root:
                 root_pos_diff = self._ref_root_pos - self.root_states[:, 0:3]
                 root_pos_dist = torch.sum(root_pos_diff * root_pos_diff, dim=-1)
                 root_pos_fail = root_pos_dist > self._root_tracking_termination_dist ** 2
                 root_pos_fail = root_pos_fail.squeeze(-1)
                 pose_fail |= root_pos_fail
-            self.reset_buf |= pose_fail
-        
-        first_step = self.episode_length_buf == 0
 
-        
-        self.reset_buf[first_step] = 0 # Do not reset on first step
+        self.reset_buf |= pose_fail
+
+        first_step = self.episode_length_buf == 0
+        self.reset_buf[first_step] = 0
+
         
 
     def _get_mimic_obs(self):
@@ -595,10 +620,21 @@ class HumanoidMimic(HumanoidChar):
         return rew.float()
     
     def _reward_feet_contact_forces(self):
-        rew = torch.norm(self.contact_forces[:, self.feet_indices, 2], dim=-1)
+        # Calculate total force per logical foot
+        feet_forces = self.contact_forces[:, self.feet_indices, 2] # (num_envs, num_bodies)
+        
+        if len(self.left_foot_indices_local) > 0 and len(self.right_foot_indices_local) > 0:
+            left_force = torch.sum(feet_forces[:, self.left_foot_indices_local], dim=1)
+            right_force = torch.sum(feet_forces[:, self.right_foot_indices_local], dim=1)
+            forces = torch.stack([left_force, right_force], dim=1) # (num_envs, 2)
+        else:
+            # Fallback to original behavior if grouping failed
+            forces = feet_forces
+            
+        rew = forces
         rew[rew < self.cfg.rewards.max_contact_force] = 0
         rew[rew > self.cfg.rewards.max_contact_force] -= self.cfg.rewards.max_contact_force
-        return rew
+        return torch.sum(rew, dim=1) # Sum penalties of both feet
     
     def _reward_feet_height(self):
         # from OmniH2O
@@ -645,15 +681,28 @@ class HumanoidMimic(HumanoidChar):
         return torch.sum(torch.square(self.torques), dim=1)
 
     def _reward_feet_air_time(self):
-        contact = self.contact_forces[:, self.feet_indices, 2] > 5.
-        self.contact_filt = torch.logical_or(contact, self.last_contacts)
-        self.last_contacts = contact
-        first_contact = (self.feet_air_time > 0.) * self.contact_filt
-        self.feet_air_time += self.dt
+        # Logical contact: True if ANY body in the group has contact
+        feet_contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        
+        if len(self.left_foot_indices_local) > 0 and len(self.right_foot_indices_local) > 0:
+            left_contact = torch.any(feet_contact[:, self.left_foot_indices_local], dim=1)
+            right_contact = torch.any(feet_contact[:, self.right_foot_indices_local], dim=1)
+            logical_contact = torch.stack([left_contact, right_contact], dim=1)
+        else:
+            logical_contact = feet_contact
+
+        self.logical_contact_filt = torch.logical_or(logical_contact, self.last_logical_contacts)
+        self.last_logical_contacts = logical_contact
+        
+        first_contact = (self.logical_feet_air_time > 0.) * self.logical_contact_filt
+        self.logical_feet_air_time += self.dt
+        
         tgt_air_time = self.cfg.rewards.feet_air_time_target
-        air_time = (self.feet_air_time - tgt_air_time) * first_contact
+        air_time = (self.logical_feet_air_time - tgt_air_time) * first_contact
         air_time = air_time.clamp(max=0.)
-        self.feet_air_time *= ~self.contact_filt
+        
+        self.logical_feet_air_time *= ~self.logical_contact_filt
+        
         rew_airtime = air_time.sum(dim=1)
         rew_airtime *= torch.norm(self._ref_root_vel[:, :2], dim=1) > 0.05
         return rew_airtime

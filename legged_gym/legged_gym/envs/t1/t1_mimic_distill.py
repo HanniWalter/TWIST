@@ -9,17 +9,17 @@ from pose.utils import torch_utils
 from legged_gym.envs.base.legged_robot import euler_from_quaternion
 from legged_gym.envs.base.humanoid_char import convert_to_local_root_body_pos, convert_to_global_root_body_pos
 
-def t1_body_from_24_to_28(body_pos_24: torch.Tensor) -> torch.Tensor:
+def t1_body_from_24_to_30(body_pos_24: torch.Tensor) -> torch.Tensor:
     """
-    Convert body positions from motion library format (24 bodies) to T1 simulation format (28 bodies).
-    The T1 robot has 4 extra fixed bodies (H1, H2, left_hand_tip, right_hand_tip) that are not in the motion library.
+    Convert body positions from motion library format (24 bodies) to T1 simulation format (30 bodies).
+    The T1 robot has 6 extra fixed bodies (H1, H2, left_hand_tip, right_hand_tip, and 4 toe links) that are not in the motion library.
     
-    T1 has 28 bodies:
+    T1 has 30 bodies:
     0-Trunk, 1-H1, 2-H2, 3-AL1, 4-AL2, 5-AL3, 6-left_hand_link, 7-AR1, 8-left_hand_tip,
     9-AR2, 10-AR3, 11-right_hand_link, 12-right_hand_tip, 13-Waist, 14-Hip_Pitch_Left,
     15-Hip_Roll_Left, 16-Hip_Yaw_Left, 17-Shank_Left, 18-Ankle_Cross_Left, 19-left_foot_link,
     20-Hip_Pitch_Right, 21-Hip_Roll_Right, 22-Hip_Yaw_Right, 23-Shank_Right, 24-Ankle_Cross_Right,
-    25-right_foot_link, 26-left_toe_link, 27-right_toe_link
+    25-right_foot_link, 26-left_inner_toe_link, 27-right_inner_toe_link, 28-left_outer_toe_link, 29-right_outer_toe_link
     
     Motion library has 24 bodies (without H1, H2, left_hand_tip, right_hand_tip).
     
@@ -30,12 +30,12 @@ def t1_body_from_24_to_28(body_pos_24: torch.Tensor) -> torch.Tensor:
     
     Returns:
     --------
-        body_pos_28 : torch.Tensor
-            Body positions of shape (N, 28, 3) for T1 simulation
+        body_pos_30 : torch.Tensor
+            Body positions of shape (N, 30, 3) for T1 simulation
     """
-    # Create mapping: for each of the 28 bodies in simulation, which index in the 24-body motion lib?
+    # Create mapping: for each of the 30 bodies in simulation, which index in the 24-body motion lib?
     # -1 means this body doesn't exist in motion lib and will be filled with zeros
-    idx_map_28_list = [
+    idx_map_30_list = [
         0,  # 0: Trunk -> 0
         -1, # 1: H1 (fixed, not in motion lib)
         -1, # 2: H2 (fixed, not in motion lib)
@@ -62,24 +62,26 @@ def t1_body_from_24_to_28(body_pos_24: torch.Tensor) -> torch.Tensor:
         19, # 23: Shank_Right -> 19
         20, # 24: Ankle_Cross_Right -> 20
         21, # 25: right_foot_link -> 21
-        22, # 26: left_toe_link -> 22
-        23, # 27: right_toe_link -> 23
+        22, # 26: left_inner_toe_link -> 22
+        23, # 27: right_inner_toe_link -> 23
+        22, # 28: left_outer_toe_link -> 22
+        23, # 29: right_outer_toe_link -> 23
     ]
     
     # Convert to tensor
-    idx_map_28 = torch.tensor(idx_map_28_list, dtype=torch.long, device=body_pos_24.device)
+    idx_map_30 = torch.tensor(idx_map_30_list, dtype=torch.long, device=body_pos_24.device)
     
-    # Create output tensor (N, 28, 3), initialized to zeros
+    # Create output tensor (N, 30, 3), initialized to zeros
     N = body_pos_24.shape[0]
-    body_pos_28 = torch.zeros((N, 28, 3), dtype=body_pos_24.dtype, device=body_pos_24.device)
+    body_pos_30 = torch.zeros((N, 30, 3), dtype=body_pos_24.dtype, device=body_pos_24.device)
     
     # Create mask for valid (non -1) indices
-    valid_mask = (idx_map_28 >= 0)
+    valid_mask = (idx_map_30 >= 0)
     
     # Copy valid body positions
-    body_pos_28[:, valid_mask, :] = body_pos_24[:, idx_map_28[valid_mask], :]
+    body_pos_30[:, valid_mask, :] = body_pos_24[:, idx_map_30[valid_mask], :]
     
-    return body_pos_28
+    return body_pos_30
 
 
 
@@ -123,9 +125,9 @@ class T1MimicDistill(HumanoidMimic):
         self._ref_root_ang_vel[env_ids] = root_ang_vel
         self._ref_dof_pos[env_ids] = dof_pos
         self._ref_dof_vel[env_ids] = dof_vel
-        # Convert from motion library format (24 bodies) to T1 simulation format (28 bodies)
+        # Convert from motion library format (24 bodies) to T1 simulation format (30 bodies)
         if body_pos.shape[1] != self._ref_body_pos[env_ids].shape[1]:
-            body_pos = t1_body_from_24_to_28(body_pos)
+            body_pos = t1_body_from_24_to_30(body_pos)
         self._ref_body_pos[env_ids] = convert_to_global_root_body_pos(root_pos=root_pos, root_rot=root_rot, body_pos=body_pos)
     
     
@@ -146,9 +148,9 @@ class T1MimicDistill(HumanoidMimic):
         self._ref_root_ang_vel[:] = root_ang_vel
         self._ref_dof_pos[:] = dof_pos
         self._ref_dof_vel[:] = dof_vel
-        # Convert from motion library format (24 bodies) to T1 simulation format (28 bodies)
+        # Convert from motion library format (24 bodies) to T1 simulation format (30 bodies)
         if body_pos.shape[1] != self._ref_body_pos.shape[1]:
-            body_pos = t1_body_from_24_to_28(body_pos)
+            body_pos = t1_body_from_24_to_30(body_pos)
         self._ref_body_pos[:] = convert_to_global_root_body_pos(root_pos=root_pos, root_rot=root_rot, body_pos=body_pos)
         
     def _update_motion_difficulty(self, env_ids):
@@ -318,12 +320,21 @@ class T1MimicDistill(HumanoidMimic):
             key_body_pos = convert_to_local_root_body_pos(self.root_states[:, 3:7], key_body_pos)
         key_body_pos = key_body_pos.reshape(self.num_envs, -1) # shape: (num_envs, num_key_bodies * 3)
         
+        # Calculate logical foot contacts (2 dims)
+        feet_contact = self.contact_forces[:, self.feet_indices, 2] > 5.
+        if hasattr(self, 'left_foot_indices_local') and len(self.left_foot_indices_local) > 0 and len(self.right_foot_indices_local) > 0:
+            left_contact = torch.any(feet_contact[:, self.left_foot_indices_local], dim=1)
+            right_contact = torch.any(feet_contact[:, self.right_foot_indices_local], dim=1)
+            logical_contact = torch.stack([left_contact, right_contact], dim=1)
+        else:
+            logical_contact = feet_contact
+
         if self.cfg.domain_rand.domain_rand_general:
             priv_info = torch.cat((
                 self.base_lin_vel, # 3 dims
                 self.root_states[:, 2:3], # 1 dim
                 key_body_pos, # num_bodies * 3 dims
-                self.contact_forces[:, self.feet_indices, 2] > 5., # 2 dims, foot contact
+                logical_contact, # 2 dims, foot contact
                 self.mass_params_tensor,
                 self.friction_coeffs_tensor,
                 self.motor_strength[0] - 1, 
@@ -403,3 +414,13 @@ class T1MimicDistill(HumanoidMimic):
     
     def _reward_ankle_action(self):
         return torch.norm(self.action_history_buf[:, -1, [13, 14, 19, 20]], dim=1)
+    
+    def _reward_hip_dof_acc(self):
+        # Hip indices: Left Hip (9, 10, 11) + Right Hip (15, 16, 17)
+        hip_dof_idx = [9, 10, 11, 15, 16, 17]
+        return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt)[:, hip_dof_idx], dim=1)
+    
+    def _reward_hip_dof_vel(self):
+        # Hip indices: Left Hip (9, 10, 11) + Right Hip (15, 16, 17)
+        hip_dof_idx = [9, 10, 11, 15, 16, 17]
+        return torch.sum(torch.square(self.dof_vel[:, hip_dof_idx]), dim=1)

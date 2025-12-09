@@ -632,7 +632,7 @@ class LeggedRobot(BaseTask):
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.base_quat = self.root_states[:, 3:7]
         
-        self.force_sensor_tensor = gymtorch.wrap_tensor(force_sensor_tensor).view(self.num_envs, 2, 6) # for feet only, see create_env()
+        self.force_sensor_tensor = gymtorch.wrap_tensor(force_sensor_tensor).view(self.num_envs, len(self.feet_indices), 6) # for feet only, see create_env()
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
 
         # initialize some data used later on
@@ -838,7 +838,13 @@ class LeggedRobot(BaseTask):
         print("DOF names:", self.dof_names)
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
-        feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+        
+        # Use feet_bodies if defined, otherwise fall back to substring matching with foot_name
+        if hasattr(self.cfg.asset, "feet_bodies") and self.cfg.asset.feet_bodies:
+            feet_names = self.cfg.asset.feet_bodies
+        else:
+            feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+            
         print("Feet names:", feet_names)
         self.torso_idx = self.gym.find_asset_rigid_body_index(robot_asset, self.cfg.asset.torso_name)
         print("Torso index:", self.torso_idx)
