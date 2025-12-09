@@ -10,6 +10,7 @@ from legged_gym.envs.base.legged_robot import euler_from_quaternion
 from legged_gym.envs.base.humanoid_char import convert_to_local_root_body_pos, convert_to_global_root_body_pos
 
 
+constant_ankle_dof_idx = [12, 13, 18, 19]
 
 #TODO wtf?
 def k1_body_from_23_to_25(body_pos_23: torch.Tensor) -> torch.Tensor:
@@ -212,7 +213,7 @@ class K1MimicDistill(HumanoidMimic):
 
         # disable ankle dof velocity observations
         # K1: Ankle DOFs are at indices 14, 15 (left) and 20, 21 (right)
-        ankle_idx = [14, 15, 20, 21]  # Left_Ankle_Pitch, Left_Ankle_Roll, Right_Ankle_Pitch, Right_Ankle_Roll
+        ankle_idx = constant_ankle_dof_idx # [14, 15, 20, 21]  # Left_Ankle_Pitch, Left_Ankle_Roll, Right_Ankle_Pitch, Right_Ankle_Roll
         
         proprio_obs_buf[:, [dof_vel_start_dim + i for i in ankle_idx]] = 0.
         
@@ -289,15 +290,15 @@ class K1MimicDistill(HumanoidMimic):
         return torch.zeros(self.num_envs, device=self.device)
     
     def _reward_ankle_dof_acc(self):
-        # K1: Ankle DOFs at indices 14, 15, 20, 21
-        ankle_dof_idx = [14, 15, 20, 21]
+        # K1: Ankle DOFs at indices 12, 13, 18, 19 (Left_Ankle_Pitch, Left_Ankle_Roll, Right_Ankle_Pitch, Right_Ankle_Roll)
+        ankle_dof_idx = constant_ankle_dof_idx
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt)[:, ankle_dof_idx], dim=1)
     
     def _reward_ankle_dof_vel(self):
-        # K1: Ankle DOFs at indices 14, 15, 20, 21
-        ankle_dof_idx = [14, 15, 20, 21]
+        # K1: Ankle DOFs at indices 12, 13, 18, 19 (Left_Ankle_Pitch, Left_Ankle_Roll, Right_Ankle_Pitch, Right_Ankle_Roll)
+        ankle_dof_idx = constant_ankle_dof_idx
         return torch.sum(torch.square(self.dof_vel[:, ankle_dof_idx]), dim=1)
     
     def _reward_ankle_action(self):
-        # K1: Ankle DOFs at indices 14, 15, 20, 21
-        return torch.norm(self.action_history_buf[:, -1, [14, 15, 20, 21]], dim=1)
+        # K1: Ankle DOFs at indices 12, 13, 18, 19 (Left_Ankle_Pitch, Left_Ankle_Roll, Right_Ankle_Pitch, Right_Ankle_Roll)
+        return torch.norm(self.action_history_buf[:, -1, constant_ankle_dof_idx], dim=1)

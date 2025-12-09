@@ -1,6 +1,12 @@
 from legged_gym.envs.base.humanoid_mimic_config import HumanoidMimicCfg, HumanoidMimicCfgPPO
 from legged_gym import LEGGED_GYM_ROOT_DIR
 
+#constants for every config
+const_num_envs = int(4096 *15/16)
+const_num_actions = 20
+const_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "left_foot_link", "right_foot_link","right_outer_toe_link","left_outer_toe_link","right_inner_toe_link","left_inner_toe_link","Head_2"] # 9 key bodies
+const_upper_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "Head_2"]
+const_max_iterations = 30002
 
 
 #TODO: k1
@@ -9,9 +15,9 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
         
-        num_envs = int(4096 * 7/8)
+        num_envs = const_num_envs
         #TODO: k1 check num actions
-        num_actions = 22
+        num_actions = const_num_actions
         obs_type = 'priv' # 'student'
         n_priv_latent = 4 + 1 + 2*num_actions
         extra_critic_obs = 3
@@ -19,7 +25,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         
         n_proprio = 3 + 2 + 3*num_actions
         n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is base, 9 is the number of key bodies
-        n_mimic_obs = 8 + 22 # 22 for dof pos
+        n_mimic_obs = 8 + const_num_actions
         n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
@@ -49,7 +55,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         track_root = False
      
         # TODO: define weights for soccer purposes
-        dof_err_w = [0.6, 0.6, # Head yaw, pitch
+        dof_err_w = [#0.6, 0.6, # Head yaw, pitch
                      0.8, 0.8, 0.8, 1.0, # Left Arm
                      0.8, 0.8, 0.8, 1.0, # Right Arm
                      1.0, 0.8, 0.8, 1.0, 0.5, 0.5, # Left Leg
@@ -72,10 +78,10 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         pos = [0, 0, 1.0]
 
         default_joint_angles = {
-            'AAHead_yaw': 0.0,
+            #'AAHead_yaw': 0.0,
             'ALeft_Shoulder_Pitch': 0.0,
             'ARight_Shoulder_Pitch': 0.0,
-            'Head_pitch': 0.0,
+            #'Head_pitch': 0.0,
             'Left_Ankle_Pitch': 0.0,
             'Left_Ankle_Roll': 0.0,
             'Left_Elbow_Pitch': 0.0,
@@ -102,8 +108,8 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         stiffness_pre = {"Hip": 80., "Knee": 80., "Ankle": 30., "Head": 4., "Shoulder": 4., "Elbow": 4.} # [N*m/rad]
         damping_pre = {"Hip": 2., "Knee": 2., "Ankle": 2., "Head": 1., "Shoulder": 1., "Elbow": 1.} # [N*m*s/rad]
         stiffness = {
-            "AAHead_yaw":            stiffness_pre["Head"],
-            "Head_pitch":            stiffness_pre["Head"],
+            #"AAHead_yaw":            stiffness_pre["Head"],
+            #"Head_pitch":            stiffness_pre["Head"],
 
             "ALeft_Shoulder_Pitch":  stiffness_pre["Shoulder"],
             "Left_Shoulder_Roll":    stiffness_pre["Shoulder"],
@@ -160,8 +166,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         }
         
         action_scale = 1
-        decimation = 5
-        # decimation = 10
+        decimation = 10
     
     class sim(HumanoidMimicCfg.sim):
         dt = 0.002 # 1/500
@@ -171,8 +176,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         clip_actions = 5.0
     
     class asset(HumanoidMimicCfg.asset):
-        # file = f'{LEGGED_GYM_ROOT_DIR}/../assets/g1/g1_custom_collision.urdf'
-        file = f'{LEGGED_GYM_ROOT_DIR}/../assets/booster_k1/K1_serial.urdf'
+        file = f'{LEGGED_GYM_ROOT_DIR}/../assets/booster_k1/K1_serial_modified_slim.urdf'
         
         #TODO: k1 check names NEXT
         # for both joint and link name
@@ -193,19 +197,30 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
 
         penalize_contacts_on = ["Arm_1", "Arm_2", "Hip", "Shank"]  # K1: Shoulder, Elbow, Hip, Knee
         terminate_after_contacts_on = ['Trunk']
+        contact_force_reset_threshold = 150.0
 
         
-        # TODO: k1 check inertia values
         # ========================= Inertia =========================
-        # shoulder, elbow, and ankle: 0.139 * 1e-4 * 16**2 + 0.017 * 1e-4 * (46/18 + 1)**2 + 0.169 * 1e-4 = 0.003597
-        # waist, hip pitch & yaw: 0.489 * 1e-4 * 14.3**2 + 0.098 * 1e-4 * 4.5**2 + 0.533 * 1e-4 = 0.0103
-        # knee, hip roll: 0.489 * 1e-4 * 22.5**2 + 0.109 * 1e-4 * 4.5**2 + 0.738 * 1e-4 = 0.0251
-        # wrist: 0.068 * 1e-4 * 25**2 = 0.00425
+        # Reference values from booster (see rotor_values_k1.csv)
+        # Formula: armature = rotor_inertia (kg·mm²) × 10⁻⁶ × gear_ratio²
+        # Arm (Shoulder Pitch/Roll, Elbow Pitch/Yaw): 10 × 10⁻⁶ × 10² = 0.001
+        # Hip-Yaw and Ankle: 21.8 × 10⁻⁶ × 36² = 0.0282528
+        # Hip-Roll: 26.2 × 10⁻⁶ × 36² = 0.0339552
+        # Hip-Pitch: 76.5 × 10⁻⁶ × 25² = 0.0478125
+        # Knee: 145 × 10⁻⁶ × 25² = 0.090625
         
-        # dof_armature = [0.0103, 0.0251, 0.0103, 0.0251, 0.003597, 0.003597] * 2 + [0.0103] * 3 + [0.003597] * 8
-        
-        # dof_armature = [0.0, 0.0, 0.0, 0.0, 0.0, 0.001] * 2 + [0.0] * 3 + [0.0] * 8
-        dof_armature = [0.0] * 22
+        # dof_armature for K1: 4 arm joints * 2 + 6 leg joints * 2 = 20 total
+        # Order: Left arm (4) + Right arm (4) + Left leg (6) + Right leg (6)
+        dof_armature = [
+            # Left Arm: Shoulder_Pitch, Shoulder_Roll, Elbow_Pitch, Elbow_Yaw
+            0.001, 0.001, 0.001, 0.001,
+            # Right Arm: Shoulder_Pitch, Shoulder_Roll, Elbow_Pitch, Elbow_Yaw
+            0.001, 0.001, 0.001, 0.001,
+            # Left Leg: Hip_Pitch, Hip_Roll, Hip_Yaw, Knee_Pitch, Ankle_Pitch, Ankle_Roll
+            0.0478125, 0.0339552, 0.0282528, 0.090625, 0.0282528, 0.0282528,
+            # Right Leg: Hip_Pitch, Hip_Roll, Hip_Yaw, Knee_Pitch, Ankle_Pitch, Ankle_Roll
+            0.0478125, 0.0339552, 0.0282528, 0.090625, 0.0282528, 0.0282528,
+        ]
         
         # ========================= Inertia =========================
         
@@ -238,7 +253,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.0
+            tracking_keybody_pos = 2.5
             
             # alive = 0.5
 
@@ -251,7 +266,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
             dof_torque_limits = -1.0
             
             dof_vel = -1e-4
-            dof_acc = -5e-8
+            dof_acc = -1e-7
             action_rate = -0.01
             
             # feet_height = 5.0
@@ -268,8 +283,8 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
             # waist_dof_acc = -5e-8 * 2
             # waist_dof_vel = -1e-4 * 2
             
-            ankle_dof_acc = -5e-8 * 2
-            ankle_dof_vel = -1e-4 * 2
+            ankle_dof_acc = -1e-7 * 2
+            ankle_dof_vel = -2e-4 * 2
             
             # ankle_action = -0.02
             
@@ -333,8 +348,8 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         motion_curriculum = True
         motion_curriculum_gamma = 0.01
         #TODO: k1 check key bodies
-        key_bodies = ["left_hand_link", "right_hand_link", "left_foot_link", "right_foot_link", "Left_Shank", "Right_Shank", "Left_Arm_3", "Right_Arm_3", "Head_2"] # 9 key bodies
-        upper_key_bodies = ["left_hand_link", "right_hand_link", "Left_Arm_3", "Right_Arm_3", "Head_2"]
+        key_bodies = const_key_bodies # 9 key bodies
+        upper_key_bodies = const_upper_key_bodies
 
         motion_file = f"{LEGGED_GYM_ROOT_DIR}/motion_data_configs/twist_dataset.yaml"
         
@@ -347,9 +362,9 @@ class K1MimicStuCfg(K1MimicPrivCfg):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
 
-        num_envs = int(4096 * 7/8)
+        num_envs = const_num_envs
         #TODO: k1 check num actions
-        num_actions = 22
+        num_actions = const_num_actions
         obs_type = 'student'
         n_priv_latent = 4 + 1 + 2*num_actions
         extra_critic_obs = 3
@@ -357,7 +372,7 @@ class K1MimicStuCfg(K1MimicPrivCfg):
         
         n_proprio = 3 + 2 + 3*num_actions
         n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
-        n_mimic_obs = 8 + 22 # 22 for dof pos
+        n_mimic_obs = 8 + const_num_actions # 22 for dof pos
         
         n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
@@ -375,10 +390,10 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
 
-        num_envs = int(4096 * 7/8)
+        num_envs = const_num_envs
 
         #TODO: k1 check num actions
-        num_actions = 22
+        num_actions = const_num_actions
         obs_type = 'student'
         n_priv_latent = 4 + 1 + 2*num_actions
         extra_critic_obs = 3
@@ -386,7 +401,7 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
         
         n_proprio = 3 + 2 + 3*num_actions
         n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
-        n_mimic_obs = 8 + 22 # 22 for dof pos
+        n_mimic_obs = 8 + const_num_actions # 22 for dof pos
 
         n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
@@ -425,7 +440,7 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.0
+            tracking_keybody_pos = 2.5
             
             # alive = 0.5
 
@@ -438,7 +453,7 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
             dof_torque_limits = -1.0
             
             dof_vel = -1e-4
-            dof_acc = -5e-8
+            dof_acc = -1e-7
             action_rate = -0.01
             
             feet_air_time = 5.0
@@ -454,8 +469,8 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
             # waist_dof_acc = -5e-8 * 2
             # waist_dof_vel = -1e-4 * 2
             
-            ankle_dof_acc = -5e-8 * 2
-            ankle_dof_vel = -1e-4 * 2
+            ankle_dof_acc = -1e-7
+            ankle_dof_vel = -2e-4
             
             # ankle_action = -0.02
             
@@ -480,7 +495,7 @@ class K1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
         policy_class_name = 'ActorCriticMimic'
         algorithm_class_name = 'PPO'
         runner_class_name = 'OnPolicyRunnerMimic'
-        max_iterations = 20_002 # number of policy updates
+        max_iterations = const_max_iterations # number of policy updates
 
         # logging
         save_interval = 500 # check for potential saves every this many iterations
@@ -502,7 +517,7 @@ class K1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
         # schedule = 'fixed' # could be adaptive, fixed
     
     class policy(HumanoidMimicCfgPPO.policy):
-        action_std = [0.7] * 12 + [0.4] * 3 + [0.5] * 8
+        action_std = [0.7] * 12 + [0.5] * 8
         init_noise_std = 1.0
         obs_context_len = 11
         actor_hidden_dims = [512, 512, 256, 128]
@@ -523,7 +538,7 @@ class K1MimicStuRLCfgDAgger(K1MimicStuRLCfg):
         algorithm_class_name = 'DaggerPPO'
         runner_class_name = 'OnPolicyDaggerRunner'
         #TODO: k1 set realistic max iterations
-        max_iterations = 30_002
+        max_iterations = const_max_iterations
         warm_iters = 100
         
         # logging
@@ -553,7 +568,7 @@ class K1MimicStuRLCfgDAgger(K1MimicStuRLCfg):
         # dagger_coef_min = 0.0  # Minimum value for dagger_coef
 
     class policy(HumanoidMimicCfgPPO.policy):
-        action_std = [0.7] * 12 + [0.4] * 3 + [0.5] * 8
+        action_std = [0.7] * 12 + [0.5] * 8
         init_noise_std = 1.0
         obs_context_len = 11
         actor_hidden_dims = [512, 512, 256, 128]
