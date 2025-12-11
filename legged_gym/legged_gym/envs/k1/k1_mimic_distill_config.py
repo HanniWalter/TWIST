@@ -192,9 +192,14 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         lower_arm_name: str = 'Arm_3'
         hand_name: list = ['right_hand_link', 'left_hand_link']
 
-        feet_bodies = ['Left_Ankle_Cross', 'Right_Ankle_Cross'] 
+        left_feet_bodies = ['left_foot_link']
+        right_feet_bodies = ['right_foot_link']
+
+        feet_bodies = left_feet_bodies + right_feet_bodies # exact names for force sensors
+        
         n_lower_body_dofs: int = 12
 
+        
         penalize_contacts_on = ["Arm_1", "Arm_2", "Hip", "Shank"]  # K1: Shoulder, Elbow, Hip, Knee
         terminate_after_contacts_on = ['Trunk']
         contact_force_reset_threshold = 150.0
