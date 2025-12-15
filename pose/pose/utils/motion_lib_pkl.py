@@ -254,4 +254,15 @@ class MotionLib:
     
     def get_motion_names(self):
         return self._motion_names
+    
+    def get_motion_ids_by_names(self, motion_names):
+        """Get motion IDs by their file names. Returns -1 for names not found."""
+        import torch
+        motion_ids = []
+        for name in motion_names:
+            if name in self._motion_names:
+                motion_ids.append(self._motion_names.index(name))
+            else:
+                motion_ids.append(-1)
+        return torch.tensor(motion_ids, device=self._device, dtype=torch.long)
         

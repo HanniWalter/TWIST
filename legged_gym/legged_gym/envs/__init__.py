@@ -43,6 +43,7 @@ from .g1.g1_mimic_distill_config import G1MimicStuRLCfg, G1MimicStuRLCfgDAgger
 from .k1.k1_mimic_distill import K1MimicDistill
 from .k1.k1_mimic_distill_config import K1MimicPrivCfg, K1MimicPrivCfgPPO
 from .k1.k1_mimic_distill_config import K1MimicStuRLCfg, K1MimicStuRLCfgDAgger
+from .k1.k1_mimic_distill_config import K1MimicStuRLCfg_modified, K1MimicStuRLCfgDAgger_modified
 
 from .t1.t1_mimic_distill import T1MimicDistill
 from .t1.t1_mimic_distill_config import T1MimicPrivCfg, T1MimicPrivCfgPPO
@@ -60,6 +61,8 @@ task_registry.register("g1_stu_rl", G1MimicDistill, G1MimicStuRLCfg(), G1MimicSt
 task_registry.register("k1_priv_mimic", K1MimicDistill, K1MimicPrivCfg(), K1MimicPrivCfgPPO())
 
 task_registry.register("k1_stu_rl", K1MimicDistill, K1MimicStuRLCfg(), K1MimicStuRLCfgDAgger())
+
+task_registry.register("k1_stu_rl_modified", K1MimicDistill, K1MimicStuRLCfg_modified(), K1MimicStuRLCfgDAgger_modified())
 
 task_registry.register("t1_priv_mimic", T1MimicDistill, T1MimicPrivCfg(), T1MimicPrivCfgPPO())
 

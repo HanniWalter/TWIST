@@ -32,6 +32,9 @@ class K1MimicDistill(HumanoidMimic):
     def __init__(self, cfg: K1MimicPrivCfg, sim_params, physics_engine, sim_device, headless):
         self.cfg = cfg
         self.obs_type = cfg.env.obs_type
+        # Counter to cycle through play motions sequentially (for single env playback)
+        # Must be initialized before super().__init__() since it calls reset_idx -> _reset_ref_motion
+        self._play_motion_counter = 0
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
         self.last_feet_z = 0.05
         self.episode_length = torch.zeros((self.num_envs), device=self.device)
@@ -45,7 +48,27 @@ class K1MimicDistill(HumanoidMimic):
     def _reset_ref_motion(self, env_ids, motion_ids=None):
         n = len(env_ids)
         if motion_ids is None:
-            motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
+            # Use specific play motions if configured, otherwise sample randomly
+            if self._play_motion_ids is not None:
+                # Filter out invalid motion IDs (-1) first
+                valid_play_motion_ids = self._play_motion_ids[self._play_motion_ids >= 0]
+                if len(valid_play_motion_ids) > 0:
+                    # Cycle through motions sequentially using a counter
+                    motion_ids = torch.zeros(n, dtype=torch.long, device=self.device)
+                    for i in range(n):
+                        motion_ids[i] = valid_play_motion_ids[self._play_motion_counter % len(valid_play_motion_ids)]
+                        self._play_motion_counter += 1
+                else:
+                    motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
+            else:
+                motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
+        
+        # Debug: Print motion names for first few environments
+        if len(env_ids) <= 10:
+            from tqdm import tqdm
+            for env_id, motion_id in zip(env_ids, motion_ids):
+                motion_name = self._motion_lib.get_motion_names()[motion_id.item()]
+                tqdm.write(f"\033[96m[K1 Env {env_id.item()}] Playing motion: {motion_name}\033[0m")
         
         if self._rand_reset:
             motion_times = self._motion_lib.sample_time(motion_ids)
@@ -254,6 +277,9 @@ class K1MimicDistill(HumanoidMimic):
             self.obs_buf = priv_obs_buf
         elif self.obs_type == 'student':
             self.obs_buf = torch.cat([obs_buf, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+        elif self.obs_type == 'student_future':
+            # Use future motion targets (priv_mimic_obs) + proprio, no history
+            self.obs_buf = torch.cat([proprio_obs_buf, priv_mimic_obs], dim=-1)
         
         if self.cfg.env.history_len > 0:
             self.privileged_obs_history_buf = torch.where(

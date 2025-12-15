@@ -14,6 +14,7 @@ from pose.utils.motion_lib_pkl import MotionLib
 
 import time
 from termcolor import cprint
+from tqdm import tqdm
 
 import torch
 
@@ -113,11 +114,36 @@ class HumanoidMimic(HumanoidChar):
         # compare two tensors are same
         # assert torch.equal(self._key_body_ids, torch.tensor(key_body_ids_motion, device=self.device, dtype=torch.long)), \
         #     f"Key body ids mismatch: {self._key_body_ids} vs {key_body_ids_motion}"
+        
+        # Check if specific play motion names are configured
+        self._play_motion_ids = None
+        if hasattr(self.cfg.env, 'play_motion_names') and self.cfg.env.play_motion_names:
+            self._play_motion_ids = self._motion_lib.get_motion_ids_by_names(self.cfg.env.play_motion_names)
+            # Filter out invalid motion IDs (-1)
+            valid_mask = self._play_motion_ids >= 0
+            if not valid_mask.all():
+                cprint(f"[HumanoidMimic] WARNING: Some motion names were not found!", "yellow")
+            if valid_mask.any():
+                cprint(f"[HumanoidMimic] Using {valid_mask.sum().item()} specific motions for playback", "green")
+                for i, motion_id in enumerate(self._play_motion_ids):
+                    if motion_id >= 0:
+                        motion_name = self._motion_lib.get_motion_names()[motion_id.item()]
+                        cprint(f"  - Motion {i}: {motion_name}", "green")
     
     def _reset_ref_motion(self, env_ids, motion_ids=None):
         n = len(env_ids)
         if motion_ids is None:
-            motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
+            # Use specific play motions if configured, otherwise sample randomly
+            if self._play_motion_ids is not None:
+                # Assign motions based on environment index (deterministic)
+                motion_ids = self._play_motion_ids[env_ids % len(self._play_motion_ids)]
+            else:
+                motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
+        
+        # Print motion names for each environment
+        for env_id, motion_id in zip(env_ids, motion_ids):
+            motion_name = self.motion_names[motion_id.item()]
+            tqdm.write(f"\033[96m[Env {env_id.item()}] Playing motion: {motion_name}\033[0m")
         
         if self._rand_reset:
             motion_times = self._motion_lib.sample_time(motion_ids)
@@ -297,66 +323,87 @@ class HumanoidMimic(HumanoidChar):
         if self.cfg.domain_rand.push_end_effector and (self.common_step_counter % self.cfg.domain_rand.push_end_effector_interval == 0):
             self._push_end_effector()
             
+
     def check_termination(self):
-        if self.termination_contact_indices.numel() > 0:
-            threshold = self.cfg.env.contact_force_reset_threshold
-            contact_norms = torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1)
-            contact_force_termination = torch.any(contact_norms > threshold, dim=1)
-        else:
-            contact_force_termination = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
+        contact_force_termination = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
         self.reset_buf = contact_force_termination
-
+        
+        # height_cutoff = self.root_states[:, 2] < self.cfg.rewards.termination_height
         height_cutoff = torch.abs(self.root_states[:, 2] - self._ref_root_pos[:, 2]) > self.cfg.rewards.root_height_diff_threshold
+
         roll_cut = torch.abs(self.roll) > self.cfg.rewards.termination_roll
         pitch_cut = torch.abs(self.pitch) > self.cfg.rewards.termination_pitch
-        orientation_cut = roll_cut | pitch_cut
+        self.reset_buf |= roll_cut
+        self.reset_buf |= pitch_cut
         motion_end = self.episode_length_buf * self.dt >= self._motion_lib.get_motion_length(self._motion_ids)
-
         self.reset_buf |= height_cutoff
-        self.reset_buf |= orientation_cut
-
+        
         if self.viewer is None:
             self.reset_buf |= motion_end
-
+        
         self.time_out_buf = self.episode_length_buf > self.max_episode_length
         if self.viewer is None:
             self.time_out_buf |= motion_end
-
+        
         self.reset_buf |= self.time_out_buf
-
+        
         vel_too_large = torch.norm(self.root_states[:, 7:10], dim=-1) > 5.
         self.reset_buf |= vel_too_large
-
-        pose_fail = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        root_pos_fail = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        
         if self._pose_termination:
             body_pos = self.rigid_body_states[:, self._key_body_ids, 0:3] - self.rigid_body_states[:, 0:1, 0:3]
-            tar_body_pos = self._ref_body_pos[:, self._key_body_ids] - self._ref_root_pos[:, None, :]
-
+            tar_body_pos = self._ref_body_pos[:, self._key_body_ids] - self._ref_root_pos[:, None, :] 
+            
             if not self.global_obs:
                 body_pos = convert_to_local_root_body_pos(self.root_states[:, 3:7], body_pos)
                 tar_body_pos = convert_to_local_root_body_pos(self._ref_root_rot, tar_body_pos)
-
-            body_pos_diff = tar_body_pos - body_pos
-            body_pos_dist = torch.sum(body_pos_diff * body_pos_diff, dim=-1)
-            body_pos_dist = torch.max(body_pos_dist, dim=-1)[0]
-
+            
+            body_pos_diff = tar_body_pos - body_pos # (envs, bodies, 3)
+            body_pos_dist = torch.sum(body_pos_diff * body_pos_diff, dim=-1) # (envs, bodies)
+            body_pos_dist = torch.max(body_pos_dist, dim=-1)[0] # (envs)
+            # if lose tracking for 50 frames continuously, reset (corresponds to 1 second)
+            # lose_tracking = body_pos_dist > self.motion_termination_dist[self._motion_ids] ** 2
+            # self.deviate_tracking_frames[lose_tracking] += 1
+            # self.deviate_tracking_frames[~lose_tracking] = 0
+            # pose_fail = self.deviate_tracking_frames >= self.cfg.motion.reset_consec_frames # 50 frames = 1 second
+            
             pose_fail = body_pos_dist > self._pose_termination_dist ** 2
-
+            
+            # pose_fail = body_pos_dist > self.motion_termination_dist[self._motion_ids] ** 2
+            
             if self._track_root:
                 root_pos_diff = self._ref_root_pos - self.root_states[:, 0:3]
                 root_pos_dist = torch.sum(root_pos_diff * root_pos_diff, dim=-1)
                 root_pos_fail = root_pos_dist > self._root_tracking_termination_dist ** 2
                 root_pos_fail = root_pos_fail.squeeze(-1)
                 pose_fail |= root_pos_fail
-
-        self.reset_buf |= pose_fail
-
+            self.reset_buf |= pose_fail
+        
         first_step = self.episode_length_buf == 0
-        self.reset_buf[first_step] = 0
 
         
+        self.reset_buf[first_step] = 0 # Do not reset on first step
+        
+        # Print termination reasons for debugging
+        return
+        if torch.any(self.reset_buf):
+            terminated_envs = self.reset_buf.nonzero(as_tuple=False).flatten()
+            print(f"[Termination] Envs {terminated_envs.tolist()[:5]}... terminated:")
+            if torch.any(contact_force_termination[terminated_envs]):
+                print(f"  - Contact force: {contact_force_termination[terminated_envs].sum().item()} envs")
+            if torch.any(height_cutoff[terminated_envs]):
+                print(f"  - Height cutoff: {height_cutoff[terminated_envs].sum().item()} envs")
+            if torch.any(roll_cut[terminated_envs]):
+                print(f"  - Roll limit: {roll_cut[terminated_envs].sum().item()} envs")
+            if torch.any(pitch_cut[terminated_envs]):
+                print(f"  - Pitch limit: {pitch_cut[terminated_envs].sum().item()} envs")
+            if torch.any(self.time_out_buf[terminated_envs]):
+                print(f"  - Timeout: {self.time_out_buf[terminated_envs].sum().item()} envs")
+            if torch.any(vel_too_large[terminated_envs]):
+                print(f"  - Velocity too large: {vel_too_large[terminated_envs].sum().item()} envs")
+            if self._pose_termination and torch.any(pose_fail[terminated_envs]):
+                print(f"  - Pose tracking fail: {pose_fail[terminated_envs].sum().item()} envs")
+             
 
     def _get_mimic_obs(self):
         num_steps = self._tar_obs_steps.shape[0]

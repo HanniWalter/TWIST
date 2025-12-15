@@ -7,9 +7,9 @@ const_num_actions = 20
 const_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "left_foot_link", "right_foot_link","right_outer_toe_link","left_outer_toe_link","right_inner_toe_link","left_inner_toe_link","Head_2"] # 9 key bodies
 const_upper_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "Head_2"]
 const_max_iterations = 30002
+#const_play_motion_names = ["BMLmovi_Subject_64_F_15_stageii.pkl", "CMU_84_17_stageii.pkl"] default motions
+const_play_motion_names = ["EyesJapanDataset_gesture_etc-20-swing_chair-aita_stageii.pkl", "KIT_kick_low_left05_stageii.pkl", "MoSh_irish_dance_stageii.pkl"]
 
-
-#TODO: k1
 class K1MimicPrivCfg(HumanoidMimicCfg):
     class env(HumanoidMimicCfg.env):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
@@ -47,6 +47,9 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         contact_buf_len = 10
         
         normalize_obs = True
+        
+        # specify motion files to be used during play
+        play_motion_names = const_play_motion_names
         
         enable_early_termination = True
         pose_termination = True
@@ -360,8 +363,6 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         
         reset_consec_frames = 30
 
-
-#TODO: k1
 class K1MimicStuCfg(K1MimicPrivCfg):
     class env(K1MimicPrivCfg.env):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
@@ -389,7 +390,6 @@ class K1MimicStuCfg(K1MimicPrivCfg):
 
         num_privileged_obs = n_priv_obs_single
 
-#TODO: k1
 class K1MimicStuRLCfg(K1MimicPrivCfg):
     class env(K1MimicPrivCfg.env):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
@@ -493,7 +493,6 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
         torque_safety_limit = 0.9
         root_height_diff_threshold = 0.2
 
-#TODO: k1
 class K1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
     seed = 1
     class runner(HumanoidMimicCfgPPO.runner):
@@ -531,8 +530,199 @@ class K1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
         layer_norm = True
         motion_latent_dim = 128
         
-#TODO: k1
 class K1MimicStuRLCfgDAgger(K1MimicStuRLCfg):
+    seed = 1
+    
+    class teachercfg(K1MimicPrivCfgPPO):
+        pass
+    
+    class runner(K1MimicPrivCfgPPO.runner):
+        policy_class_name = 'ActorCriticMimic'
+        algorithm_class_name = 'DaggerPPO'
+        runner_class_name = 'OnPolicyDaggerRunner'
+        #TODO: k1 set realistic max iterations
+        max_iterations = const_max_iterations
+        warm_iters = 100
+        
+        # logging
+        save_interval = 500
+        experiment_name = 'test'
+        run_name = ''
+        resume = False
+        load_run = -1
+        checkpoint = -1
+        resume_path = None
+        
+        teacher_experiment_name = 'test'
+        teacher_proj_name = 'k1_priv_mimic'
+        teacher_checkpoint = -1
+        eval_student = False
+
+    class algorithm(HumanoidMimicCfgPPO.algorithm):
+        grad_penalty_coef_schedule = [0.00, 0.00, 700, 1000]
+        std_schedule = [1.0, 0.4, 4000, 1500]
+        entropy_coef = 0.005
+        
+        dagger_coef_anneal_steps = 60000  # Total steps to anneal dagger_coef to dagger_coef_min
+        
+        dagger_coef = 0.1
+        dagger_coef_min = 0.01  # Minimum value for dagger_coef
+        # dagger_coef = 0.0
+        # dagger_coef_min = 0.0  # Minimum value for dagger_coef
+
+    class policy(HumanoidMimicCfgPPO.policy):
+        action_std = [0.7] * 12 + [0.5] * 8
+        init_noise_std = 1.0
+        obs_context_len = 11
+        actor_hidden_dims = [512, 512, 256, 128]
+        critic_hidden_dims = [512, 512, 256, 128]
+        activation = 'silu'
+        layer_norm = True
+        motion_latent_dim = 128
+
+
+# ===================== MODIFIED STUDENT CONFIGS =====================
+
+class K1MimicStuCfg_modified(K1MimicPrivCfg):
+    class env(K1MimicPrivCfg.env):
+        tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
+
+        num_envs = const_num_envs
+        #TODO: k1 check num actions
+        num_actions = const_num_actions
+        obs_type = 'student'
+        n_priv_latent = 4 + 1 + 2*num_actions
+        extra_critic_obs = 3
+        n_priv = 0
+        
+        n_proprio = 3 + 2 + 3*num_actions
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
+        n_mimic_obs = 8 + const_num_actions # 22 for dof pos
+        
+        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
+        history_len = 10
+        
+        n_obs_single = n_mimic_obs + n_proprio
+        n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
+        
+        num_observations = n_obs_single * (history_len + 1)
+
+        num_privileged_obs = n_priv_obs_single
+
+class K1MimicStuRLCfg_modified(K1MimicPrivCfg):
+    class env(K1MimicPrivCfg.env):
+        # Zukünftige Motion-Target Schritte (wie beim Teacher)
+        tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
+
+        num_envs = const_num_envs
+
+        num_actions = const_num_actions
+        obs_type = 'student_future'  # Uses future motion targets instead of history
+        n_priv_latent = 4 + 1 + 2*num_actions
+        extra_critic_obs = 3
+        n_priv = 0
+        
+        n_proprio = 3 + 2 + 3*num_actions  # 65: gravity(3) + commands(2) + dof_pos/vel/actions(60)
+        
+        # Zukünftige Motion-Targets: 20 Schritte × (8 + 20 + 27) = 20 × 55 = 1100
+        # 8 = root pose (quat 4 + pos 3 + 1)
+        # 20 = target dof positions  
+        # 27 = key body positions (9 bodies × 3)
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9)
+        
+        n_mimic_obs = 8 + const_num_actions  # Nur für aktuellen Schritt (nicht verwendet)
+
+        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions  # privileged info für Critic
+        
+        # KEINE History mehr - stattdessen zukünftige Schritte
+        history_len = 0
+        
+        # Student Observation: proprio + zukünftige motion targets
+        n_obs_single = n_proprio + n_priv_mimic_obs  # 65 + 1100 = 1165
+        n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
+        
+        num_observations = n_obs_single  # Keine History-Multiplikation
+
+        num_privileged_obs = n_priv_obs_single
+    
+    class rewards(HumanoidMimicCfg.rewards):
+        regularization_names = [
+                        # "feet_stumble",
+                        # "feet_contact_forces",
+                        # "lin_vel_z",
+                        # "ang_vel_xy",
+                        # "orientation",
+                        # "dof_pos_limits",
+                        # "dof_torque_limits",
+                        # "collision",
+                        # "torque_penalty",
+                        # "thigh_torque_roll_yaw",
+                        # "thigh_roll_yaw_acc",
+                        # "dof_acc",
+                        # "dof_vel",
+                        # "action_rate",
+                        ]
+        regularization_scale = 1.0
+        regularization_scale_range = [0.8,2.0]
+        regularization_scale_curriculum = False
+        regularization_scale_gamma = 0.0001
+        class scales:
+            tracking_joint_dof = 0.6
+            tracking_joint_vel = 0.2
+            tracking_root_pose = 0.6
+            tracking_root_vel = 1.0
+            # tracking_keybody_pos = 0.6
+            tracking_keybody_pos = 2.5
+            
+            # alive = 0.5
+
+            feet_slip = -0.1 # higher than teacher
+            feet_contact_forces = -5e-4      
+            # collision = -10.0
+            feet_stumble = -1.25
+            
+            dof_pos_limits = -5.0
+            dof_torque_limits = -1.0
+            
+            dof_vel = -1e-4
+            dof_acc = -1e-7
+            action_rate = -0.01
+            
+            feet_air_time = 5.0
+            
+            
+            ang_vel_xy = -0.01
+            # orientation = -0.4
+            
+            # base_acc = -5e-7
+            # orientation = -1.0
+            
+            # =========================
+            # waist_dof_acc = -5e-8 * 2
+            # waist_dof_vel = -1e-4 * 2
+            
+            ankle_dof_acc = -1e-7
+            ankle_dof_vel = -2e-4
+            
+            # ankle_action = -0.02
+            
+
+        min_dist = 0.1
+        max_dist = 0.4
+        max_knee_dist = 0.4
+        feet_height_target = 0.2
+        feet_air_time_target = 0.5
+        only_positive_rewards = False
+        tracking_sigma = 0.2
+        tracking_sigma_ang = 0.125
+        max_contact_force = 100  # Forces above this value are penalized
+        soft_torque_limit = 0.95
+        torque_safety_limit = 0.9
+        root_height_diff_threshold = 0.2
+
+class K1MimicStuRLCfgDAgger_modified(K1MimicStuRLCfg_modified):
     seed = 1
     
     class teachercfg(K1MimicPrivCfgPPO):
