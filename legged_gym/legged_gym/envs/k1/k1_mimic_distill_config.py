@@ -4,7 +4,8 @@ from legged_gym import LEGGED_GYM_ROOT_DIR
 #constants for every config
 const_num_envs = int(4096 *15/16)
 const_num_actions = 20
-const_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "left_foot_link", "right_foot_link","right_outer_toe_link","left_outer_toe_link","right_inner_toe_link","left_inner_toe_link","Head_2"] # 9 key bodies
+const_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "left_foot_link", "right_foot_link","right_outer_toe_link","left_outer_toe_link","right_inner_toe_link","left_inner_toe_link","Head_2", "Left_Shank","Right_Shank", "left_hand_link", "right_hand_link"] # 13 key bodies
+const_num_key_bodies = len(const_key_bodies)  # 13
 const_upper_key_bodies = ["left_hand_end_ball", "right_hand_end_ball", "Head_2"]
 const_max_iterations = 30002
 #const_play_motion_names = ["BMLmovi_Subject_64_F_15_stageii.pkl", "CMU_84_17_stageii.pkl"] default motions
@@ -24,9 +25,9 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is base, 9 is the number of key bodies
-        n_mimic_obs = 8 + const_num_actions
-        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*const_num_key_bodies) # 13 key bodies
+        n_mimic_obs = 8 + 3*const_num_key_bodies # 13 key bodies * 3D positions (instead of DOF positions)
+        n_priv_info = 3 + 1 + 3*const_num_key_bodies + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
@@ -256,12 +257,12 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         regularization_scale_curriculum = False
         regularization_scale_gamma = 0.0001
         class scales:
-            tracking_joint_dof = 0.6
-            tracking_joint_vel = 0.2
+            tracking_joint_dof = 0.06  # Reduced 10x - student sees key positions, not DOF targets
+            tracking_joint_vel = 0.02  # Reduced 10x - student sees key positions, not DOF targets
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.5
+            tracking_keybody_pos = 50
             
             # alive = 0.5
 
@@ -339,6 +340,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         motor_strength_range = [0.8, 1.2]
 
         action_delay = (True and domain_rand_general)
+        steps_before_action_delay = 10000  # iterations before action delay is enabled
         action_buf_len = 8
     
     class noise(HumanoidMimicCfg.noise):
@@ -377,10 +379,10 @@ class K1MimicStuCfg(K1MimicPrivCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
-        n_mimic_obs = 8 + const_num_actions # 22 for dof pos
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*const_num_key_bodies) # 13 key bodies
+        n_mimic_obs = 8 + 3*const_num_key_bodies # 13 key bodies * 3D positions (instead of DOF positions)
         
-        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
+        n_priv_info = 3 + 1 + 3*const_num_key_bodies + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_mimic_obs + n_proprio
@@ -405,10 +407,10 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
-        n_mimic_obs = 8 + const_num_actions # 22 for dof pos
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*const_num_key_bodies) # 13 key bodies
+        n_mimic_obs = 8 + 3*const_num_key_bodies # 13 key bodies * 3D positions (instead of DOF positions)
 
-        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
+        n_priv_info = 3 + 1 + 3*const_num_key_bodies + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_mimic_obs + n_proprio
@@ -440,12 +442,12 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
         regularization_scale_curriculum = False
         regularization_scale_gamma = 0.0001
         class scales:
-            tracking_joint_dof = 0.6
-            tracking_joint_vel = 0.2
+            tracking_joint_dof = 0.06  # Reduced 10x - student sees key positions, not DOF targets
+            tracking_joint_vel = 0.02  # Reduced 10x - student sees key positions, not DOF targets
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.5
+            tracking_keybody_pos = 50
             
             # alive = 0.5
 
@@ -597,10 +599,10 @@ class K1MimicStuCfg_modified(K1MimicPrivCfg):
         n_priv = 0
         
         n_proprio = 3 + 2 + 3*num_actions
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9) # Hardcode for now, 9 is the number of key bodies
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*const_num_key_bodies) # 13 key bodies
         n_mimic_obs = 8 + const_num_actions # 22 for dof pos
         
-        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
+        n_priv_info = 3 + 1 + 3*const_num_key_bodies + 2 + 4 + 1 + 2*num_actions # base lin vel, root height, key body pos, contact mask, priv latent
         history_len = 10
         
         n_obs_single = n_mimic_obs + n_proprio
@@ -626,21 +628,21 @@ class K1MimicStuRLCfg_modified(K1MimicPrivCfg):
         
         n_proprio = 3 + 2 + 3*num_actions  # 65: gravity(3) + commands(2) + dof_pos/vel/actions(60)
         
-        # Zukünftige Motion-Targets: 20 Schritte × (8 + 20 + 27) = 20 × 55 = 1100
+        # Zukünftige Motion-Targets: 20 Schritte × (8 + 20 + 39) = 20 × 67 = 1340
         # 8 = root pose (quat 4 + pos 3 + 1)
         # 20 = target dof positions  
-        # 27 = key body positions (9 bodies × 3)
-        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9)
+        # 39 = key body positions (13 bodies × 3)
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*const_num_key_bodies)
         
         n_mimic_obs = 8 + const_num_actions  # Nur für aktuellen Schritt (nicht verwendet)
 
-        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions  # privileged info für Critic
+        n_priv_info = 3 + 1 + 3*const_num_key_bodies + 2 + 4 + 1 + 2*num_actions  # privileged info für Critic
         
         # KEINE History mehr - stattdessen zukünftige Schritte
         history_len = 0
         
         # Student Observation: proprio + zukünftige motion targets
-        n_obs_single = n_proprio + n_priv_mimic_obs  # 65 + 1100 = 1165
+        n_obs_single = n_proprio + n_priv_mimic_obs  # 65 + 1340 = 1405
         n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
         
         num_observations = n_obs_single  # Keine History-Multiplikation
@@ -674,7 +676,7 @@ class K1MimicStuRLCfg_modified(K1MimicPrivCfg):
             tracking_root_pose = 0.6
             tracking_root_vel = 1.0
             # tracking_keybody_pos = 0.6
-            tracking_keybody_pos = 2.5
+            tracking_keybody_pos = 50
             
             # alive = 0.5
 

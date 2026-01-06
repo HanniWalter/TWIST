@@ -106,7 +106,7 @@ class HumanoidChar(LeggedRobot):
         self.action_history_buf = torch.cat([self.action_history_buf[:, 1:].clone(), action_tensor[:, None, :].clone()], dim=1)
         
         if self.cfg.domain_rand.action_delay:
-            steps_before_action_delay = 5000
+            steps_before_action_delay = getattr(self.cfg.domain_rand, 'steps_before_action_delay', 5000)
             if self.total_env_steps_counter <= steps_before_action_delay * 24:
                 self.delay = torch.tensor(0, device=self.device, dtype=torch.float)
             else:

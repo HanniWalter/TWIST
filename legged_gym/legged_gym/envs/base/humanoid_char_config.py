@@ -196,6 +196,7 @@ class HumanoidCharCfg(BaseConfig):
         motor_strength_range = [0.8, 1.2]
 
         action_delay = (True and domain_rand_general)
+        steps_before_action_delay = 5000  # iterations before action delay is enabled
         action_buf_len = 8
 
     class rewards:

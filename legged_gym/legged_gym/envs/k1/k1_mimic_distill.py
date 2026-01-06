@@ -63,8 +63,8 @@ class K1MimicDistill(HumanoidMimic):
             else:
                 motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
         
-        # Debug: Print motion names for first few environments
-        if len(env_ids) <= 10:
+        # Print motion names only during play mode (not headless) to avoid spam during training
+        if not self.headless and len(env_ids) <= 10:
             from tqdm import tqdm
             for env_id, motion_id in zip(env_ids, motion_ids):
                 motion_name = self._motion_lib.get_motion_names()[motion_id.item()]
@@ -180,7 +180,11 @@ class K1MimicDistill(HumanoidMimic):
             root_ang_vel = quat_rotate_inverse(root_rot, root_ang_vel)
       
         whole_key_body_pos = body_pos[:, self._key_body_ids_motion, :]
-        if self.global_obs:
+        if not self.global_obs:
+            # Convert to local root frame when global_obs=False (matches compute_observations behavior)
+            whole_key_body_pos = convert_to_local_root_body_pos(root_rot=root_rot, body_pos=whole_key_body_pos)
+        else:
+            # Convert to global frame when global_obs=True
             whole_key_body_pos = convert_to_global_root_body_pos(root_pos=root_pos, root_rot=root_rot, body_pos=whole_key_body_pos)
         whole_key_body_pos = whole_key_body_pos.reshape(self.num_envs, num_steps, -1)
         
@@ -201,14 +205,15 @@ class K1MimicDistill(HumanoidMimic):
         ), dim=-1) # shape: (num_envs, num_steps, 7 + num_dof + num_key_bodies * 3)
         
         
-        # v6, align mocap
+        # v7, use key body positions instead of dof_pos for student observation
+        # Extract only the current timestep (index 0) for student observation
         mimic_obs_buf = torch.cat((
-            root_pos[..., 2:3], # 1 dim
-            roll, pitch, yaw, # 3 dims
-            root_vel, # 3 dims
-            root_ang_vel[..., 2:3], # 1 dim, yaw only
-            dof_pos, # num_dof dims
-        ), dim=-1)[:, 0:1] # shape: (num_envs, 1, 7 + num_dof)
+            root_pos[:, 0:1, 2:3], # 1 dim
+            roll[:, 0:1, :], pitch[:, 0:1, :], yaw[:, 0:1, :], # 3 dims
+            root_vel[:, 0:1, :], # 3 dims
+            root_ang_vel[:, 0:1, 2:3], # 1 dim, yaw only
+            whole_key_body_pos[:, 0:1, :], # 9 key bodies * 3D = 27 dims (instead of dof_pos)
+        ), dim=-1) # shape: (num_envs, 1, 8 + 27 = 35)
         
         
         return priv_mimic_obs_buf.reshape(self.num_envs, -1), mimic_obs_buf.reshape(self.num_envs, -1)
