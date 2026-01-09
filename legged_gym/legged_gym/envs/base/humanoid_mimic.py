@@ -116,8 +116,10 @@ class HumanoidMimic(HumanoidChar):
         #     f"Key body ids mismatch: {self._key_body_ids} vs {key_body_ids_motion}"
         
         # Check if specific play motion names are configured
+        # Only use play_motion_ids during play mode (when NOT headless)
+        # During training (headless=True), sample from all motions
         self._play_motion_ids = None
-        if hasattr(self.cfg.env, 'play_motion_names') and self.cfg.env.play_motion_names:
+        if not self.headless and hasattr(self.cfg.env, 'play_motion_names') and self.cfg.env.play_motion_names:
             self._play_motion_ids = self._motion_lib.get_motion_ids_by_names(self.cfg.env.play_motion_names)
             # Filter out invalid motion IDs (-1)
             valid_mask = self._play_motion_ids >= 0
@@ -140,10 +142,11 @@ class HumanoidMimic(HumanoidChar):
             else:
                 motion_ids = self._motion_lib.sample_motions(n, motion_difficulty=self.motion_difficulty)
         
-        # Print motion names for each environment
-        for env_id, motion_id in zip(env_ids, motion_ids):
-            motion_name = self.motion_names[motion_id.item()]
-            tqdm.write(f"\033[96m[Env {env_id.item()}] Playing motion: {motion_name}\033[0m")
+        # Print motion names only during play mode (not headless) to avoid spam during training
+        if not self.headless:
+            for env_id, motion_id in zip(env_ids, motion_ids):
+                motion_name = self.motion_names[motion_id.item()]
+                tqdm.write(f"\033[96m[Env {env_id.item()}] Playing motion: {motion_name}\033[0m")
         
         if self._rand_reset:
             motion_times = self._motion_lib.sample_time(motion_ids)

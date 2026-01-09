@@ -36,3 +36,4 @@ body_models/
 joao_data/
 logs/wandb/latest-run
 logs/wandb/*
+legged_gym/tflite_exporter/verification_data
