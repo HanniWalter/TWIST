@@ -639,8 +639,8 @@ class K1MimicStuRLCfg_modified(K1MimicPrivCfg):
         # KEINE History mehr - stattdessen zukünftige Schritte
         history_len = 0
         
-        # Student Observation: proprio + zukünftige motion targets
-        n_obs_single = n_proprio + n_priv_mimic_obs  # 65 + 1100 = 1165
+        # Student Observation: motion targets + proprio (motion first, consistent with Actor model)
+        n_obs_single = n_priv_mimic_obs + n_proprio  # 1100 + 65 = 1165
         n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info
         
         num_observations = n_obs_single  # Keine History-Multiplikation

@@ -116,10 +116,21 @@ class OnPolicyDaggerRunner:
         
         
         policy_class = eval(self.cfg["policy_class_name"])
+        
+        # Use correct motion observation parameters based on obs_type
+        if hasattr(self.env.cfg.env, 'obs_type') and self.env.cfg.env.obs_type == 'student_future':
+            # student_future uses full future motion targets (same as teacher)
+            num_motion_obs = self.env.cfg.env.n_priv_mimic_obs
+            num_motion_steps = len(self.env.cfg.env.tar_obs_steps)
+        else:
+            # Regular student uses single-step motion observations
+            num_motion_obs = self.env.cfg.env.n_mimic_obs
+            num_motion_steps = 1
+        
         actor_critic = policy_class(num_observations=self.env.num_obs,
                                     num_critic_observations=self.env.num_privileged_obs,
-                                    num_motion_observations=self.env.cfg.env.n_mimic_obs,
-                                    num_motion_steps=1,
+                                    num_motion_observations=num_motion_obs,
+                                    num_motion_steps=num_motion_steps,
                                     num_actions=self.env.num_actions,
                                     **self.policy_cfg).to(self.device)
                 

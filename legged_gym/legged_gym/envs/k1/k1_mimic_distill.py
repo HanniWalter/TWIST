@@ -279,7 +279,8 @@ class K1MimicDistill(HumanoidMimic):
             self.obs_buf = torch.cat([obs_buf, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
         elif self.obs_type == 'student_future':
             # Use future motion targets (priv_mimic_obs) + proprio, no history
-            self.obs_buf = torch.cat([proprio_obs_buf, priv_mimic_obs], dim=-1)
+            # Motion first to match Actor model expectations (same order as priv_obs_buf)
+            self.obs_buf = torch.cat([priv_mimic_obs, proprio_obs_buf], dim=-1)
         
         if self.cfg.env.history_len > 0:
             self.privileged_obs_history_buf = torch.where(
