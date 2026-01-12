@@ -227,29 +227,32 @@ def infer_model_config(checkpoint_path):
     # Num actions (from last actor layer)
     num_actions = state_dict['actor.actor_backbone.9.weight'].shape[0]
     
+    # Determine tsteps from conv layer kernel size
+    if 'actor.motion_encoder.conv_layers.0.weight' in state_dict:
+        conv1 = state_dict['actor.motion_encoder.conv_layers.0.weight']
+        kernel_size = conv1.shape[2]
+        if kernel_size == 6:
+            num_motion_steps = 20
+        elif kernel_size == 8:
+            num_motion_steps = 50
+        elif kernel_size == 4:
+            num_motion_steps = 10
+        else:
+            num_motion_steps = 1
+    else:
+        num_motion_steps = 1
+    
     # Calculate num_motion_observations
-    # backbone input = num_obs - num_motion_obs + motion_latent + single_motion
+    num_single_motion = motion_enc_input
+    num_motion_observations = num_single_motion * num_motion_steps
+    
+    # Verify with backbone input size
     backbone_input_size = state_dict['actor.actor_backbone.0.weight'].shape[1]
-    # backbone_input_size = num_observations - num_motion_observations + motion_latent_dim + num_single_motion
-    # Since num_single_motion = num_motion_observations / num_motion_steps
-    # And for num_motion_steps = 1: num_single_motion = num_motion_observations
-    # So: backbone_input = num_obs - num_motion_obs + motion_latent + num_motion_obs = num_obs + motion_latent
-    # Wait, that's not right. Let me recalculate.
+    expected_backbone_input = (num_observations - num_motion_observations) + num_single_motion + motion_latent_dim
     
-    # From Actor.forward:
-    # motion_obs = obs[:, :num_motion_observations]
-    # motion_latent = motion_encoder(motion_obs)  # shape: (batch, motion_latent_dim)
-    # backbone_input = cat([obs[:, num_motion_observations:], obs[:, :num_single_motion], motion_latent])
-    # backbone_input_size = (num_obs - num_motion_obs) + num_single_motion + motion_latent_dim
-    
-    # For tsteps=1: num_single_motion = num_motion_observations
-    # backbone_input_size = num_obs - num_motion_obs + num_motion_obs + motion_latent_dim = num_obs + motion_latent_dim
-    # But 1293 != 1165 + 128 = 1293 ✓
-    
-    num_single_motion = motion_enc_input  # 28
-    # For tsteps=1, num_motion_observations = num_single_motion * 1 = 28
-    num_motion_observations = num_single_motion
-    num_motion_steps = 1
+    if backbone_input_size != expected_backbone_input:
+        print(f"Warning: backbone input size mismatch!")
+        print(f"  Expected: {expected_backbone_input}, Actual: {backbone_input_size}")
     
     # Infer actor hidden dims from layer weights
     actor_hidden_dims = []
@@ -288,23 +291,100 @@ def infer_model_config(checkpoint_path):
     return config
 
 
-def export_to_tflite(model, output_path, num_observations):
-    """Export PyTorch model to TFLite format using ai-edge-torch."""
-    import ai_edge_torch
-    
+def export_to_onnx(model, output_path, num_observations):
+    """Export PyTorch model to ONNX format."""
     model.eval()
     
     # Create sample input
     sample_input = torch.randn(1, num_observations)
     
-    print(f"Exporting model to TFLite...")
+    onnx_path = os.path.splitext(output_path)[0] + '.onnx'
+    
+    print(f"Exporting model to ONNX...")
     print(f"  Input shape: {sample_input.shape}")
     
-    # Convert to TFLite using ai-edge-torch
-    edge_model = ai_edge_torch.convert(model, (sample_input,))
+    # Export to ONNX with opset 11 for better onnx-tf compatibility
+    torch.onnx.export(
+        model,
+        sample_input,
+        onnx_path,
+        export_params=True,
+        opset_version=11,
+        do_constant_folding=True,
+        input_names=['observations'],
+        output_names=['actions'],
+        dynamic_axes={
+            'observations': {0: 'batch_size'},
+            'actions': {0: 'batch_size'}
+        }
+    )
     
-    # Save the TFLite model
-    edge_model.export(output_path)
+    print(f"Successfully exported to ONNX: {onnx_path}")
+    file_size = os.path.getsize(onnx_path)
+    print(f"  File size: {file_size / 1024:.2f} KB")
+    
+    return onnx_path
+
+
+def export_to_tflite(model, output_path, num_observations):
+    """Export PyTorch model to TFLite format via ONNX and TensorFlow."""
+    model.eval()
+    
+    # Create sample input
+    sample_input = torch.randn(1, num_observations)
+    
+    # First export to ONNX
+    onnx_path = export_to_onnx(model, output_path, num_observations)
+    
+    print(f"\nConverting ONNX to TFLite...")
+    
+    try:
+        # Try ai-edge-torch first (fastest, most compatible)
+        import ai_edge_torch
+        print("Using ai-edge-torch for conversion...")
+        edge_model = ai_edge_torch.convert(model, (sample_input,))
+        edge_model.export(output_path)
+    except ImportError:
+        # Fall back to onnx-tf + TensorFlow
+        print("ai-edge-torch not available, using onnx-tf + TensorFlow...")
+        try:
+            import onnx
+            from onnx_tf.backend import prepare
+            import tensorflow as tf
+            
+            # Load ONNX model
+            onnx_model = onnx.load(onnx_path)
+            
+            # Convert to TensorFlow
+            tf_rep = prepare(onnx_model)
+            
+            # Export to SavedModel
+            saved_model_path = os.path.splitext(output_path)[0] + '_saved_model'
+            tf_rep.export_graph(saved_model_path)
+            
+            # Convert SavedModel to TFLite
+            converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_path)
+            converter.target_spec.supported_ops = [
+                tf.lite.OpsSet.TFLITE_BUILTINS,
+                tf.lite.OpsSet.SELECT_TF_OPS
+            ]
+            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            tflite_model = converter.convert()
+            
+            # Save TFLite model
+            with open(output_path, 'wb') as f:
+                f.write(tflite_model)
+            
+            # Cleanup saved model directory
+            import shutil
+            if os.path.exists(saved_model_path):
+                shutil.rmtree(saved_model_path)
+                
+        except Exception as e:
+            print(f"TFLite conversion failed: {e}")
+            print(f"ONNX model saved at: {onnx_path}")
+            print("You can convert it to TFLite using other tools.")
+            return
     
     print(f"Successfully exported to {output_path}")
     

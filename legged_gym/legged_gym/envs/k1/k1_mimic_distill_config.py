@@ -581,9 +581,9 @@ class K1MimicStuRLCfgDAgger(K1MimicStuRLCfg):
         motion_latent_dim = 128
 
 
-# ===================== MODIFIED STUDENT CONFIGS =====================
+# ===================== FUTURE STUDENT CONFIGS (with keypoints) =====================
 
-class K1MimicStuCfg_modified(K1MimicPrivCfg):
+class K1MimicStuCfg_future_keypoints(K1MimicPrivCfg):
     class env(K1MimicPrivCfg.env):
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                          50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
@@ -610,7 +610,7 @@ class K1MimicStuCfg_modified(K1MimicPrivCfg):
 
         num_privileged_obs = n_priv_obs_single
 
-class K1MimicStuRLCfg_modified(K1MimicPrivCfg):
+class K1MimicStuRLCfg_future_keypoints(K1MimicPrivCfg):
     class env(K1MimicPrivCfg.env):
         # Zukünftige Motion-Target Schritte (wie beim Teacher)
         tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
@@ -722,7 +722,7 @@ class K1MimicStuRLCfg_modified(K1MimicPrivCfg):
         torque_safety_limit = 0.9
         root_height_diff_threshold = 0.2
 
-class K1MimicStuRLCfgDAgger_modified(K1MimicStuRLCfg_modified):
+class K1MimicStuRLCfgDAgger_future_keypoints(K1MimicStuRLCfg_future_keypoints):
     seed = 1
     
     class teachercfg(K1MimicPrivCfgPPO):
@@ -761,6 +761,145 @@ class K1MimicStuRLCfgDAgger_modified(K1MimicStuRLCfg_modified):
         dagger_coef_min = 0.01  # Minimum value for dagger_coef
         # dagger_coef = 0.0
         # dagger_coef_min = 0.0  # Minimum value for dagger_coef
+
+    class policy(HumanoidMimicCfgPPO.policy):
+        action_std = [0.7] * 12 + [0.5] * 8
+        init_noise_std = 1.0
+        obs_context_len = 11
+        actor_hidden_dims = [512, 512, 256, 128]
+        critic_hidden_dims = [512, 512, 256, 128]
+        activation = 'silu'
+        layer_norm = True
+        motion_latent_dim = 128
+
+
+# ===================== FUTURE STUDENT (default, without keypoints) =====================
+
+class K1MimicStuRLCfg_future(K1MimicPrivCfg):
+    """
+    Future Student ohne Key Body Positions im Input.
+    Verwendet zukünftige Motion-Targets, aber nur root pose + dof_pos (keine keypoints).
+    
+    Input-Vektor: 20 Schritte × 28 Features + 65 proprio = 560 + 65 = 625
+    Pro Schritt: root_height(1) + rpy(3) + root_vel(3) + yaw_vel(1) + dof_pos(20) = 28
+    """
+    class env(K1MimicPrivCfg.env):
+        # Zukünftige Motion-Target Schritte (wie beim Teacher)
+        tar_obs_steps = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+                         50, 55, 60, 65, 70, 75, 80, 85, 90, 95,]
+
+        num_envs = const_num_envs
+
+        num_actions = const_num_actions
+        obs_type = 'student_future_no_keypoints'  # Uses future motion targets WITHOUT key body positions
+        n_priv_latent = 4 + 1 + 2*num_actions
+        extra_critic_obs = 3
+        n_priv = 0
+        
+        n_proprio = 3 + 2 + 3*num_actions  # 65: gravity(3) + commands(2) + dof_pos/vel/actions(60)
+        
+        # Zukünftige Motion-Targets OHNE key_body_pos: 20 Schritte × 28 = 560
+        # 28 = root_height(1) + rpy(3) + root_vel(3) + yaw_vel(1) + dof_pos(20)
+        n_future_mimic_obs = len(tar_obs_steps) * (8 + num_actions)  # 20 × 28 = 560
+        
+        # priv_mimic_obs bleibt für Teacher/Critic gleich (mit keypoints)
+        n_priv_mimic_obs = len(tar_obs_steps) * (8 + num_actions + 3*9)  # 1100
+        
+        n_mimic_obs = 8 + const_num_actions  # 28 pro Schritt
+
+        n_priv_info = 3 + 1 + 3*9 + 2 + 4 + 1 + 2*num_actions  # privileged info für Critic
+        
+        # KEINE History mehr - stattdessen zukünftige Schritte
+        history_len = 0
+        
+        # Student Observation: future motion (ohne keypoints) + proprio
+        n_obs_single = n_future_mimic_obs + n_proprio  # 560 + 65 = 625
+        n_priv_obs_single = n_priv_mimic_obs + n_proprio + n_priv_info  # Teacher hat weiterhin keypoints
+        
+        num_observations = n_obs_single  # 625
+
+        num_privileged_obs = n_priv_obs_single  # 1237 (unverändert für Teacher/Critic)
+    
+    class rewards(HumanoidMimicCfg.rewards):
+        regularization_names = []
+        regularization_scale = 1.0
+        regularization_scale_range = [0.8,2.0]
+        regularization_scale_curriculum = False
+        regularization_scale_gamma = 0.0001
+        class scales:
+            tracking_joint_dof = 0.6
+            tracking_joint_vel = 0.2
+            tracking_root_pose = 0.6
+            tracking_root_vel = 1.0
+            tracking_keybody_pos = 2.5
+
+            feet_slip = -0.1
+            feet_contact_forces = -5e-4      
+            feet_stumble = -1.25
+            
+            dof_pos_limits = -5.0
+            dof_torque_limits = -1.0
+            
+            dof_vel = -1e-4
+            dof_acc = -1e-7
+            action_rate = -0.01
+            
+            feet_air_time = 5.0
+            
+            ang_vel_xy = -0.01
+            
+            ankle_dof_acc = -1e-7
+            ankle_dof_vel = -2e-4
+
+        min_dist = 0.1
+        max_dist = 0.4
+        max_knee_dist = 0.4
+        feet_height_target = 0.2
+        feet_air_time_target = 0.5
+        only_positive_rewards = False
+        tracking_sigma = 0.2
+        tracking_sigma_ang = 0.125
+        max_contact_force = 100
+        soft_torque_limit = 0.95
+        torque_safety_limit = 0.9
+        root_height_diff_threshold = 0.2
+
+
+class K1MimicStuRLCfgDAgger_future(K1MimicStuRLCfg_future):
+    """DAgger training config for student without keypoints"""
+    seed = 1
+    
+    class teachercfg(K1MimicPrivCfgPPO):
+        pass
+    
+    class runner(K1MimicPrivCfgPPO.runner):
+        policy_class_name = 'ActorCriticMimic'
+        algorithm_class_name = 'DaggerPPO'
+        runner_class_name = 'OnPolicyDaggerRunner'
+        max_iterations = const_max_iterations
+        warm_iters = 100
+        
+        save_interval = 500
+        experiment_name = 'test'
+        run_name = ''
+        resume = False
+        load_run = -1
+        checkpoint = -1
+        resume_path = None
+        
+        teacher_experiment_name = 'test'
+        teacher_proj_name = 'k1_priv_mimic'
+        teacher_checkpoint = -1
+        eval_student = False
+
+    class algorithm(HumanoidMimicCfgPPO.algorithm):
+        grad_penalty_coef_schedule = [0.00, 0.00, 700, 1000]
+        std_schedule = [1.0, 0.4, 4000, 1500]
+        entropy_coef = 0.005
+        
+        dagger_coef_anneal_steps = 60000
+        dagger_coef = 0.1
+        dagger_coef_min = 0.01
 
     class policy(HumanoidMimicCfgPPO.policy):
         action_std = [0.7] * 12 + [0.5] * 8

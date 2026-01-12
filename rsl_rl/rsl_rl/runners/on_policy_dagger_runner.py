@@ -119,8 +119,12 @@ class OnPolicyDaggerRunner:
         
         # Use correct motion observation parameters based on obs_type
         if hasattr(self.env.cfg.env, 'obs_type') and self.env.cfg.env.obs_type == 'student_future':
-            # student_future uses full future motion targets (same as teacher)
+            # student_future uses full future motion targets with keypoints (same as teacher)
             num_motion_obs = self.env.cfg.env.n_priv_mimic_obs
+            num_motion_steps = len(self.env.cfg.env.tar_obs_steps)
+        elif hasattr(self.env.cfg.env, 'obs_type') and self.env.cfg.env.obs_type == 'student_future_no_keypoints':
+            # student_future_no_keypoints uses future motion targets WITHOUT keypoints
+            num_motion_obs = self.env.cfg.env.n_future_mimic_obs
             num_motion_steps = len(self.env.cfg.env.tar_obs_steps)
         else:
             # Regular student uses single-step motion observations

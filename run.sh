@@ -17,6 +17,8 @@ GMR_DATASET=""
 DEBUG=false
 RESUME=false
 CHECKPOINT=-1
+FUTURE=false
+KEYPOINTS=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -89,13 +91,23 @@ while [[ $# -gt 0 ]]; do
             DEBUG=true
             shift
             ;;
+        --future)
+            FUTURE=true
+            shift
+            ;;
+        --keypoints)
+            KEYPOINTS=true
+            shift
+            ;;
         -h|--help)
             echo "Usage: $0 [--init] [--teacher] [--student] [--robot ROBOT] [--no-wandb]"
             echo ""
             echo "Options:"
             echo "  --init        Initialize/setup the environment"
             echo "  --teacher     Train the teacher model"
-            echo "  --student     Train the student model"
+            echo "  --student     Train the student model (use --future for future obs, --keypoints for keypoint obs)"
+            echo "  --future      Use future observations instead of history (for student training)"
+            echo "  --keypoints   Include keypoint positions in observations (requires --future)"
             echo "  --play_teacher Play/evaluate trained teacher model"
             echo "  --play_student Play/evaluate trained student model"
             echo "  --logs        List all training runs and checkpoints (use with --robot to filter)"
@@ -111,6 +123,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  $0 --teacher --robot g1                           # Train new G1 teacher"
+            echo "  $0 --student --robot k1 --future                  # Train K1 future student (no keypoints)"
+            echo "  $0 --student --robot k1 --future --keypoints      # Train K1 future student with keypoints"
             echo "  $0 --teacher --robot g1 --resume --exptid g1_teacher_1027_1548  # Resume specific run"
             echo "  $0 --logs --robot t1                              # List T1 training runs"
             exit 0
@@ -359,16 +373,38 @@ if [[ "$TRAIN_STUDENT" = true ]]; then
     
     cd legged_gym/legged_gym/scripts
 
-    # Set default values if not provided
-    exptid="${ROBOT}_student_$(date +%m%d_%H%M)"
+    # Determine student type based on --future and --keypoints flags
+    if [[ "$FUTURE" = true ]]; then
+        if [[ "$KEYPOINTS" = true ]]; then
+            student_type="future_keypoints"
+        else
+            student_type="future"
+        fi
+    else
+        student_type="rl"
+    fi
+
+    # Set default experiment ID based on student type
+    exptid="${ROBOT}_${student_type}_$(date +%m%d_%H%M)"
     device="$DEVICE"
 
+    # Set task and project names based on robot and student type
     if [ "$ROBOT" = "t1" ]; then
         task_name="t1_stu_rl"
         proj_name="t1_stu_rl"
     elif [ "$ROBOT" = "k1" ]; then
-        task_name="k1_stu_rl_modified"
-        proj_name="k1_stu_rl_modified"
+        if [[ "$FUTURE" = true ]]; then
+            if [[ "$KEYPOINTS" = true ]]; then
+                task_name="k1_stu_future_keypoints"
+                proj_name="k1_stu_future_keypoints"
+            else
+                task_name="k1_stu_future"
+                proj_name="k1_stu_future"
+            fi
+        else
+            task_name="k1_stu_rl"
+            proj_name="k1_stu_rl"
+        fi
     elif [ "$ROBOT" = "g1" ]; then
         task_name="g1_stu_rl"
         proj_name="g1_stu_rl"
@@ -378,6 +414,7 @@ if [[ "$TRAIN_STUDENT" = true ]]; then
     fi
 
     echo "Using task: $task_name and project: $proj_name"
+    echo "Student type: $student_type"
     
     # Handle resume logic
     if [[ "$RESUME" = true ]]; then
@@ -493,12 +530,23 @@ if [[ "$PLAY_STUDENT" = true ]]; then
     
     cd legged_gym/legged_gym/scripts
 
+    # Set task and project names based on robot and student type
     if [ "$ROBOT" = "t1" ]; then
         task_name="t1_stu_rl"
         proj_name="t1_stu_rl"
     elif [ "$ROBOT" = "k1" ]; then
-        task_name="k1_stu_rl_modified"
-        proj_name="k1_stu_rl_modified"
+        if [[ "$FUTURE" = true ]]; then
+            if [[ "$KEYPOINTS" = true ]]; then
+                task_name="k1_stu_future_keypoints"
+                proj_name="k1_stu_future_keypoints"
+            else
+                task_name="k1_stu_future"
+                proj_name="k1_stu_future"
+            fi
+        else
+            task_name="k1_stu_rl"
+            proj_name="k1_stu_rl"
+        fi
     elif [ "$ROBOT" = "g1" ]; then
         task_name="g1_stu_rl"
         proj_name="g1_stu_rl"
@@ -515,14 +563,14 @@ if [[ "$PLAY_STUDENT" = true ]]; then
     # Check if EXPTID is provided
     if [ -z "$EXPTID" ]; then
         echo "Error: --exptid is required for playing student"
-        echo "Usage: $0 --play_student --robot ROBOT --exptid EXPERIMENT_ID --teacher_exptid TEACHER_EXPERIMENT_ID [--proj_name PROJECT]"
+        echo "Usage: $0 --play_student --robot ROBOT --exptid EXPERIMENT_ID --teacher_exptid TEACHER_EXPERIMENT_ID [--proj_name PROJECT] [--future] [--keypoints]"
         exit 1
     fi
 
     # Check if TEACHER_EXPTID is provided
     if [ -z "$TEACHER_EXPTID" ]; then
         echo "Error: --teacher_exptid is required for playing student"
-        echo "Usage: $0 --play_student --robot ROBOT --exptid EXPERIMENT_ID --teacher_exptid TEACHER_EXPERIMENT_ID [--proj_name PROJECT]"
+        echo "Usage: $0 --play_student --robot ROBOT --exptid EXPERIMENT_ID --teacher_exptid TEACHER_EXPERIMENT_ID [--proj_name PROJECT] [--future] [--keypoints]"
         exit 1
     fi
 

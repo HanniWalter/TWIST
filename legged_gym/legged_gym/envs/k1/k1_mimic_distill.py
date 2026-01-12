@@ -201,22 +201,24 @@ class K1MimicDistill(HumanoidMimic):
         ), dim=-1) # shape: (num_envs, num_steps, 7 + num_dof + num_key_bodies * 3)
         
         
-        # v6, align mocap
-        mimic_obs_buf = torch.cat((
+        # v6, align mocap - all future steps without key_body_pos
+        mimic_obs_buf_all = torch.cat((
             root_pos[..., 2:3], # 1 dim
             roll, pitch, yaw, # 3 dims
             root_vel, # 3 dims
             root_ang_vel[..., 2:3], # 1 dim, yaw only
             dof_pos, # num_dof dims
-        ), dim=-1)[:, 0:1] # shape: (num_envs, 1, 7 + num_dof)
+        ), dim=-1) # shape: (num_envs, num_steps, 8 + num_dof)
         
+        # Single step for backward compatibility
+        mimic_obs_buf = mimic_obs_buf_all[:, 0:1] # shape: (num_envs, 1, 8 + num_dof)
         
-        return priv_mimic_obs_buf.reshape(self.num_envs, -1), mimic_obs_buf.reshape(self.num_envs, -1)
+        return priv_mimic_obs_buf.reshape(self.num_envs, -1), mimic_obs_buf.reshape(self.num_envs, -1), mimic_obs_buf_all.reshape(self.num_envs, -1)
 
     def compute_observations(self):
         imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         self.base_yaw_quat = quat_from_euler_xyz(0*self.yaw, 0*self.yaw, self.yaw)
-        priv_mimic_obs, mimic_obs = self._get_mimic_obs()
+        priv_mimic_obs, mimic_obs, mimic_obs_all_steps = self._get_mimic_obs()
         
         proprio_obs_buf = torch.cat((
                             self.base_ang_vel  * self.obs_scales.ang_vel,   # 3 dims
@@ -281,6 +283,11 @@ class K1MimicDistill(HumanoidMimic):
             # Use future motion targets (priv_mimic_obs) + proprio, no history
             # Motion first to match Actor model expectations (same order as priv_obs_buf)
             self.obs_buf = torch.cat([priv_mimic_obs, proprio_obs_buf], dim=-1)
+        elif self.obs_type == 'student_future_no_keypoints':
+            # Use future motion targets WITHOUT key_body_pos + proprio, no history
+            # Motion first to match Actor model expectations
+            # mimic_obs_all_steps contains: root_height(1) + rpy(3) + root_vel(3) + yaw_vel(1) + dof_pos(20) = 28 per step
+            self.obs_buf = torch.cat([mimic_obs_all_steps, proprio_obs_buf], dim=-1)
         
         if self.cfg.env.history_len > 0:
             self.privileged_obs_history_buf = torch.where(

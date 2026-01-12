@@ -1,0 +1,232 @@
+# Observation Order Confusion Analysis
+
+## Problem Summary
+
+The K1 robot's TWIST policy outputs incorrect joint positions (bent knees ~1.3 rad instead of following GMR targets ~0.17 rad). Investigation revealed a **fundamental mismatch** between how observations are ordered in training vs. what the Actor model architecture expects.
+
+---
+
+## The Two Conflicting Orders
+
+### Order A: Environment (`student_future`) - **PROPRIO FIRST**
+```
+[proprio (65)] + [motion (1100)] = 1165 total
+  Index 0-64:     Proprio observations
+  Index 65-1164:  Motion targets (20 steps × 55 features)
+```
+
+**Source:** `TWIST/legged_gym/legged_gym/envs/k1/k1_mimic_distill.py` lines 280-282:
+```python
+elif self.obs_type == 'student_future':
+    # Use future motion targets (priv_mimic_obs) + proprio, no history
+    self.obs_buf = torch.cat([proprio_obs_buf, priv_mimic_obs], dim=-1)
+```
+
+### Order B: Actor Model - **MOTION FIRST**
+```
+[motion (N)] + [proprio (rest)] = 1165 total
+  Index 0 to N-1:      Motion observations
+  Index N to end:      Proprio/other observations
+```
+
+**Source:** `TWIST/rsl_rl/rsl_rl/modules/actor_critic_mimic.py` lines 118-121:
+```python
+def forward(self, obs, hist_encoding: bool = False):
+    motion_obs = obs[:, :self.num_motion_observations]  # FIRST N elements are motion
+    motion_latent = self.motion_encoder(motion_obs)
+    backbone_input = torch.cat([obs[:, self.num_motion_observations:], obs[:, :self.num_single_motion_observations], motion_latent], dim=1)
+```
+
+---
+
+## How the Confusion Arose
+
+### 1. Regular 'student' obs_type uses MOTION FIRST
+
+The original 'student' observation type (with history) uses motion-first ordering:
+
+**Source:** `TWIST/legged_gym/legged_gym/envs/k1/k1_mimic_distill.py` lines 263-278:
+```python
+obs_buf = torch.cat((
+    mimic_obs,        # MOTION FIRST (28 features)
+    proprio_obs_buf,  # PROPRIO SECOND (65 features)
+), dim=-1)
+
+# Later...
+elif self.obs_type == 'student':
+    self.obs_buf = torch.cat([obs_buf, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+```
+
+This order matches what the Actor model expects!
+
+### 2. 'student_future' obs_type was added with PROPRIO FIRST
+
+When `student_future` was implemented, it used a **different ordering**:
+
+```python
+elif self.obs_type == 'student_future':
+    self.obs_buf = torch.cat([proprio_obs_buf, priv_mimic_obs], dim=-1)  # PROPRIO FIRST!
+```
+
+This **breaks the convention** that the Actor model expects.
+
+### 3. DAgger Runner Hardcodes Wrong Parameters for Student
+
+**Source:** `TWIST/rsl_rl/rsl_rl/runners/on_policy_dagger_runner.py` lines 119-123:
+```python
+actor_critic = policy_class(
+    num_observations=self.env.num_obs,              # 1165 (correct)
+    num_motion_observations=self.env.cfg.env.n_mimic_obs,  # 28 (WRONG for student_future!)
+    num_motion_steps=1,                              # 1 (WRONG for student_future!)
+    num_actions=self.env.num_actions,
+    ...)
+```
+
+The student is created with:
+- `num_motion_observations = n_mimic_obs = 28` (single step motion features)
+- `num_motion_steps = 1`
+
+But `student_future` provides:
+- `n_priv_mimic_obs = 1100` (20 steps × 55 features)
+- With proprio-first ordering
+
+Compare to the teacher (lines 95-100):
+```python
+self.teacher_actor = Actor(
+    num_observations=self.env.num_privileged_obs,
+    num_motion_observations=self.env.cfg.env.n_priv_mimic_obs,  # 1100 (correct)
+    num_motion_steps=self.env.cfg.env.tar_obs_steps,            # 20 (correct)
+    ...)
+```
+
+### 4. K1 Config Comments Confirm PROPRIO FIRST Intent
+
+**Source:** `TWIST/legged_gym/legged_gym/envs/k1/k1_mimic_distill_config.py` lines 642-644:
+```python
+n_proprio = 3 + 2 + 3*num_actions  # 65: gravity(3) + commands(2) + dof_pos/vel/actions(60)
+
+# Student Observation: proprio + zukünftige motion targets
+n_obs_single = n_proprio + n_priv_mimic_obs  # 65 + 1100 = 1165
+```
+
+The comment explicitly says "proprio + motion targets" (proprio first).
+
+---
+
+## Impact on Training
+
+During DAgger training:
+1. Environment provides: `[proprio(65) + motion(1100)]` (proprio-first)
+2. Student Actor slices: `obs[:, :28]` as "motion" (actually gets first 28 bytes of proprio!)
+3. Student Actor uses: `obs[:, 28:]` as "proprio" (actually gets 37 bytes of proprio + 1100 bytes of motion)
+
+This means the student learned a **completely different mapping** than intended:
+- The "motion encoder" learned to process proprio data (gravity, commands, dof_pos[:28])
+- The "backbone" learned to process remaining proprio + all motion data
+
+---
+
+## Impact on Deployment (C++ Code)
+
+The C++ deployment code in `twist.cpp` tried both orderings:
+
+### Attempt 1: Motion First (original assumption)
+```cpp
+// Motion observations first (indices 0-1099)
+// Proprio second (indices 1100-1164)
+```
+Result: Didn't work
+
+### Attempt 2: Proprio First (matching environment)
+```cpp
+// Proprio first (indices 0-64)
+// Motion second (indices 65-1164)
+```
+Result: Still didn't work
+
+---
+
+## Root Cause
+
+The trained model learned a **corrupted mapping** because:
+
+1. **Environment order:** `[proprio(65) | motion(1100)]`
+2. **Actor slicing:** `obs[:, :28]` → gets `proprio[0:28]` instead of motion!
+3. **Actor backbone:** `obs[:, 28:]` → gets `proprio[28:65] + motion[0:1100]`
+
+The model was trained with this mismatch, so it learned to:
+- Use the first 28 proprio features as if they were motion
+- Use everything else (37 proprio + 1100 motion) as backbone input
+
+---
+
+## Possible Solutions
+
+### Solution 1: Fix the Environment (for future training)
+Change `k1_mimic_distill.py` line 280-282 to match motion-first convention:
+```python
+elif self.obs_type == 'student_future':
+    self.obs_buf = torch.cat([priv_mimic_obs, proprio_obs_buf], dim=-1)  # MOTION FIRST
+```
+
+### Solution 2: Fix the DAgger Runner (for future training)
+Update lines 119-123 to use correct parameters for `student_future`:
+```python
+if self.env.cfg.env.obs_type == 'student_future':
+    num_motion_obs = self.env.cfg.env.n_priv_mimic_obs  # 1100
+    num_motion_steps = len(self.env.cfg.env.tar_obs_steps)  # 20
+else:
+    num_motion_obs = self.env.cfg.env.n_mimic_obs  # 28
+    num_motion_steps = 1
+
+actor_critic = policy_class(
+    num_motion_observations=num_motion_obs,
+    num_motion_steps=num_motion_steps,
+    ...)
+```
+
+### Solution 3: Match the Corrupted Training (for current model)
+If the model was trained with the mismatch, the C++ code must replicate it:
+```cpp
+// Replicate the training mismatch:
+// The model learned obs[:28] = proprio[0:28], obs[28:] = proprio[28:65] + motion[0:1100]
+// So provide: [proprio(65) | motion(1100)]
+// And let the model do its corrupted slicing
+
+// Index 0-64: Proprio
+// Index 65-1164: Motion (but model will slice 0:28 as "motion" and 28:1165 as "backbone")
+```
+
+---
+
+## Files Involved
+
+| File | Role | Order Used |
+|------|------|------------|
+| `k1_mimic_distill.py:280-282` | Environment `student_future` | Proprio first |
+| `k1_mimic_distill.py:263-266` | Environment `student` (regular) | Motion first |
+| `actor_critic_mimic.py:118-121` | Actor.forward() slicing | Expects motion first |
+| `on_policy_dagger_runner.py:119-123` | Student creation | Uses n_mimic_obs=28 |
+| `on_policy_dagger_runner.py:95-100` | Teacher creation | Uses n_priv_mimic_obs=1100 |
+| `k1_mimic_distill_config.py:642-644` | K1 student_future config | Documents proprio first |
+| `twist.cpp` | C++ deployment | Currently proprio first |
+
+---
+
+## Verification Steps
+
+1. **Inspect the checkpoint:** Check the motion_encoder first layer input size
+2. **Run inference in Python:** Compare outputs with known-good simulation
+3. **Log actual values:** Print what the model receives vs. what it should receive
+4. **Retrain with fix:** Apply Solution 1 or 2 and retrain the model
+
+---
+
+## Conclusion
+
+The observation order confusion stems from:
+1. Inconsistent conventions between `student` (motion-first) and `student_future` (proprio-first)
+2. DAgger runner not being updated for `student_future` obs_type
+3. The trained model learning a corrupted mapping due to these mismatches
+
+The model was trained receiving proprio data where it expected motion data, making the learned policy fundamentally incompatible with proper GMR motion tracking.
