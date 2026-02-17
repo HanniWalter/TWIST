@@ -184,6 +184,12 @@ class HumanoidCharCfg(BaseConfig):
         randomize_base_com = (True and domain_rand_general)
         added_com_range = [-0.1, 0.1]
         
+        randomize_link_mass = (True and domain_rand_general)
+        link_mass_range = [0.9, 1.1]
+
+        randomize_link_com = (True and domain_rand_general)
+        link_com_range = [-0.005, 0.005]
+        
         push_robots = (True and domain_rand_general)
         push_interval_s = 8
         max_push_vel_xy = 1.0
@@ -194,6 +200,11 @@ class HumanoidCharCfg(BaseConfig):
 
         randomize_motor = (True and domain_rand_general)
         motor_strength_range = [0.8, 1.2]
+        stiffness_multiplier_range = [0.5, 1.5]
+        damping_multiplier_range = [0.5, 1.5]
+
+        randomize_joint_friction = (True and domain_rand_general)
+        joint_friction_range = [0.0, 0.05]
 
         action_delay = (True and domain_rand_general)
         action_buf_len = 8

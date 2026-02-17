@@ -33,6 +33,7 @@ import os
 from legged_gym.envs import *
 from legged_gym.gym_utils import get_args, task_registry
 import torch
+import numpy as np
 import faulthandler
 from tqdm import tqdm
 from termcolor import cprint
@@ -144,16 +145,93 @@ def play(args):
         
     env_id = env.lookat_id
 
+    # Test with real-world debugging input ONCE before the main loop
+    #twist_expected_output = [1.40007, 0.731191, 1.18439, -1.06781, 1.01839, 0.107984, 0.987685, 0.578106, -0.339, 0.380429, -0.055434, 0.595255, -0.417355, -0.198895, -0.299504, -0.37781, -0.236548, 0.703261, -0.172993, -0.0959824]
+    
+    # Create tensor from twist_input and run through policy
+    #twist_obs = torch.tensor(twist_input, dtype=torch.float32, device=env.device).unsqueeze(0)  # Add batch dimension
+    #cprint("=" * 80, "yellow")
+    #cprint("DEBUGGING: Running policy with real-world twist input", "yellow")
+    #cprint(f"Input shape: {twist_obs.shape}", "yellow")
+    
+    #if args.use_jit:
+    #    print("using jit")
+    #    twist_actions = policy_jit(twist_obs)
+    #else:
+    #    if if_normalize and normalizer is not None:
+    #        print("normalizing twist obs")
+    #        twist_obs_normalized = normalizer.normalize(twist_obs)
+    #    else:
+    #        print("not normalizing twist obs")
+    #        twist_obs_normalized = twist_obs
+    #    twist_actions = policy(twist_obs_normalized, hist_encoding=True)
+    
+    #cprint("=" * 80, "green")
+    #cprint("POLICY OUTPUT with real-world input:", "green")
+    #print(twist_actions.detach().cpu().numpy().tolist()[0])
+    #cprint("=" * 80, "green")
+    #cprint("EXPECTED OUTPUT:", "cyan")
+    #print(twist_expected_output)
+    #cprint("=" * 80, "cyan")
+
+
+    #1000 steps
     for i in tqdm(range(traj_length)):
         if args.use_jit:
+            print("using jit")
             actions = policy_jit(obs.detach())
+            print("jit policy actions")
         else:
             if if_normalize and normalizer is not None:
                 normalized_obs = normalizer.normalize(obs.detach())
             else:
                 normalized_obs = obs.detach()
+                print("unnormalized obs")
             actions = policy(normalized_obs, hist_encoding=True)
+            #print(type(normalized_obs.detach()))
+            #print(normalized_obs.detach().shape)
+            #torch.Size([1, 1023])
+
+            # ============================================================
+            # OBSERVATION SPACE BREAKDOWN (1023 total dimensions)
+            # ============================================================
+            # Based on k1_mimic_distill_config.py (K1MimicStuCfg)
+            # Structure: 11 frames stacked (1 current + 10 history)
+            # Single frame observation = 93 dimensions
+            # Total = 93 * 11 = 1023
+            #
+            # Per-frame breakdown (93 dims each):
+            # ------------------------------------------------------------
+            # MOTION TARGETS (mimic_obs) - indices [0:28]
+            #   [0:1]    - Target root height (1)
+            #   [1:4]    - Target root Euler angles (roll, pitch, yaw) (3)
+            #   [4:7]    - Target root linear velocity (3)
+            #   [7:8]    - Target root yaw angular velocity (1)
+            #   [8:28]   - Target joint positions (20)
+            #
+            # PROPRIOCEPTION (proprio_obs_buf) - indices [28:93]
+            #   [28:31]  - Base angular velocity (3)
+            #   [31:33]  - IMU (roll, pitch) (2)
+            #   [33:53]  - Joint positions (dof_pos - default) (20)
+            #   [53:73]  - Joint velocities (dof_vel) (20)
+            #   [73:93]  - Previous actions (20)
+            #
+            # HISTORY STRUCTURE:
+            #   Frame 0  (most recent):  indices [0:93]
+            #   Frame 1  (t-1):          indices [93:186]
+            #   Frame 2  (t-2):          indices [186:279]
+            #   ...
+            #   Frame 10 (t-10):         indices [930:1023]
+            # ============================================================
+            #print(type(normalized_obs.detach()))
+            #print(normalized_obs.detach().shape)
+            #torch.Size([1, 1023])
+
+
+
+            print("xxx policy actions")
         obs, _, rews, dones, infos = env.step(actions.detach())
+
         if args.record_video:
             imgs = env.render_record(mode='rgb_array')
             if imgs is not None:

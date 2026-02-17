@@ -69,6 +69,7 @@ class LeggedRobotCfg(BaseConfig):
         
         randomize_start_pos = False
         randomize_start_vel = False
+        rand_pop_vel_range = 0.1 # velocity range
         randomize_start_yaw = False
         rand_yaw_range = 1.2
         randomize_start_y = False
@@ -276,10 +277,21 @@ class LeggedRobotCfg(BaseConfig):
         added_mass_range = [0., 3.]
         randomize_base_com = True
         added_com_range = [-0.2, 0.2]
+        randomize_link_mass = True
+        link_mass_range = [0.9, 1.1] # scaling factor
+        randomize_link_com = True
+        link_com_range = [-0.005, 0.005] # additive
         
         push_robots = True
         push_interval_s = 8
         max_push_vel_xy = 0.5
+        max_push_ang_vel = 0.5 # rad/s
+        
+        # sustained push (force/torque)
+        sustained_push_interval_s = 5.0 # interval for starting new force/torque
+        push_duration_s = 1.0 
+        max_push_force = 40.0 
+        max_push_torque = 2.0 
 
         push_end_effector = True
         push_end_effector_interval_s = 8
@@ -287,6 +299,11 @@ class LeggedRobotCfg(BaseConfig):
 
         randomize_motor = True
         motor_strength_range = [0.8, 1.2]
+        stiffness_multiplier_range = [0.5, 1.5] 
+        damping_multiplier_range = [0.5, 1.5]
+        
+        randomize_joint_friction = True
+        joint_friction_range = [0.0, 0.05] # additive, in Nm
 
         delay_update_global_steps = 24 * 8000
         action_delay = False

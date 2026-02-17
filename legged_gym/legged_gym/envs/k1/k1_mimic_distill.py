@@ -262,6 +262,9 @@ class K1MimicDistill(HumanoidMimic):
         else:
             priv_info = torch.zeros((self.num_envs, self.cfg.env.n_priv_info), device=self.device)
         
+        # print(mimic_obs.shape)
+        # print(proprio_obs_buf.shape)
+        # exit()
         obs_buf = torch.cat((
             mimic_obs,
             proprio_obs_buf,

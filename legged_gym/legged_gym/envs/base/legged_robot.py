@@ -305,8 +305,7 @@ class LeggedRobot(BaseTask):
         priv_latent = torch.cat((
             self.mass_params_tensor,
             self.friction_coeffs_tensor,
-            self.motor_strength[0] - 1, 
-            self.motor_strength[1] - 1
+            self.motor_strength - 1
         ), dim=-1)
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
@@ -415,32 +414,25 @@ class LeggedRobot(BaseTask):
                 self.dof_pos_limits[i, 0] = props["lower"][i].item()
                 self.dof_pos_limits[i, 1] = props["upper"][i].item()
                 self.dof_vel_limits[i] = props["velocity"][i].item()
-                self.torque_limits[i] = props["effort"][i].item() * self.cfg.rewards.torque_safety_limit
+                self.torque_limits[i] = props["effort"][i].item()
                 # soft limits
                 m = (self.dof_pos_limits[i, 0] + self.dof_pos_limits[i, 1]) / 2
                 r = self.dof_pos_limits[i, 1] - self.dof_pos_limits[i, 0]
                 self.dof_pos_limits[i, 0] = m - 0.5 * r * self.cfg.rewards.soft_dof_pos_limit
                 self.dof_pos_limits[i, 1] = m + 0.5 * r * self.cfg.rewards.soft_dof_pos_limit
-                if hasattr(self.cfg.asset, "dof_armature") and self.cfg.asset.dof_armature:
-                    props["armature"][i] = self.cfg.asset.dof_armature[i]
-                   
+
         return props
 
     def _process_rigid_body_props(self, props, env_id):
         # No need to use tensors as only called upon env creation
         if self.cfg.domain_rand.randomize_base_mass:
-            rng_mass = self.cfg.domain_rand.added_mass_range
-            rand_mass = np.random.uniform(rng_mass[0], rng_mass[1], size=(1, ))
-            props[self.torso_idx].mass += rand_mass
+            rng = self.cfg.domain_rand.added_mass_range
+            rand_mass = np.random.uniform(rng[0], rng[1])
+            props[0].mass += rand_mass
         else:
-            rand_mass = np.zeros((1, ))
-        if self.cfg.domain_rand.randomize_base_com:
-            rng_com = self.cfg.domain_rand.added_com_range
-            rand_com = np.random.uniform(rng_com[0], rng_com[1], size=(3, ))
-            props[self.torso_idx].com += gymapi.Vec3(*rand_com)
-        else:
-            rand_com = np.zeros(3)
-        mass_params = np.concatenate([rand_mass, rand_com])
+            rand_mass = 0.
+        
+        mass_params = np.array([rand_mass, 0., 0., 0.])
         return props, mass_params
     
     def _post_physics_step_callback(self):
@@ -492,12 +484,8 @@ class LeggedRobot(BaseTask):
         # actions_scaled[:, 11:] = 0.0
         control_type = self.cfg.control.control_type
         if control_type=="P":
-            if not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
-                torques = self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains*self.dof_vel
-            else:
-                torques = self.motor_strength[0] * self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.motor_strength[1] * self.d_gains*self.dof_vel
-                
-        elif control_type=="V":
+            torques = self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains*self.dof_vel
+            torques = torques * self.motor_strength
             torques = self.p_gains*(actions_scaled - self.dof_vel) - self.d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
         elif control_type=="T":
             torques = actions_scaled
@@ -513,7 +501,7 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
         """
-        self.dof_pos[env_ids] = self.default_dof_pos + torch_rand_float(0., 0.5, (len(env_ids), self.num_dof), device=self.device)
+        self.dof_pos[env_ids] = self.default_dof_pos + torch_rand_float(-0.1, 0.1, (len(env_ids), self.num_dof), device=self.device)
         self.dof_vel[env_ids] = 0.
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -533,6 +521,9 @@ class LeggedRobot(BaseTask):
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
             if self.cfg.env.randomize_start_pos:
                 self.root_states[env_ids, :2] += torch_rand_float(-0.3, 0.3, (len(env_ids), 2), device=self.device) # xy position within 1m of the center
+            if self.cfg.env.randomize_start_vel:
+                self.root_states[env_ids, 7:9] += torch_rand_float(-self.cfg.env.rand_pop_vel_range, self.cfg.env.rand_pop_vel_range, (len(env_ids), 2), device=self.device)
+                self.root_states[env_ids, 10:13] += torch_rand_float(-self.cfg.env.rand_pop_vel_range, self.cfg.env.rand_pop_vel_range, (len(env_ids), 3), device=self.device)
             if self.cfg.env.randomize_start_yaw:
                 rand_yaw = torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
                 quat = quat_from_euler_xyz(0*rand_yaw, 0*rand_yaw, rand_yaw) 
@@ -552,6 +543,38 @@ class LeggedRobot(BaseTask):
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_states),
                                                      gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+
+    def _update_push_parameters(self):
+        # Update push timer (in control steps)
+        self.sustained_push_timer -= 1
+        
+        # Reset forces when timer expires
+        reset_indices = (self.sustained_push_timer <= 0)
+        self.sustained_push_force[reset_indices] = 0.
+        self.sustained_push_torque[reset_indices] = 0.
+        
+        # Check for new pushes
+        if self.common_step_counter > 0 and (self.common_step_counter % self.cfg.domain_rand.sustained_push_interval == 0):
+            max_force = self.cfg.domain_rand.max_push_force
+            max_torque = self.cfg.domain_rand.max_push_torque
+            
+            self.sustained_push_force = torch_rand_float(-max_force, max_force, (self.num_envs, 3), device=self.device)
+            self.sustained_push_torque = torch_rand_float(-max_torque, max_torque, (self.num_envs, 3), device=self.device)
+            
+            self.sustained_push_timer[:] = self.cfg.domain_rand.push_duration # All start pushing
+
+    def _apply_sustained_push(self):
+        # Apply current sustained forces/torques
+        # Reset forces/torques buffers
+        self.forces[:] = 0.
+        self.rigid_body_torques[:] = 0.
+        
+        # Set torso forces/torques
+        self.forces[:, self.torso_idx, :] = self.sustained_push_force
+        self.rigid_body_torques[:, self.torso_idx, :] = self.sustained_push_torque
+        
+        # Apply
+        self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(self.forces), gymtorch.unwrap_tensor(self.rigid_body_torques), gymapi.GLOBAL_SPACE)
 
     def _push_robots(self):
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
@@ -643,6 +666,7 @@ class LeggedRobot(BaseTask):
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
         self.torques = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.forces = torch.zeros(self.num_envs, self.num_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
+        self.rigid_body_torques = torch.zeros(self.num_envs, self.num_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -656,6 +680,11 @@ class LeggedRobot(BaseTask):
             self.obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, self.cfg.env.n_proprio, device=self.device, dtype=torch.float)
         self.action_history_buf = torch.zeros(self.num_envs, self.cfg.domain_rand.action_buf_len, self.num_actions, device=self.device, dtype=torch.float)
         self.contact_buf = torch.zeros(self.num_envs, self.cfg.env.contact_buf_len, 2, device=self.device, dtype=torch.float)
+        
+        # Sustained push buffers
+        self.sustained_push_force = torch.zeros(self.num_envs, 3, device=self.device, dtype=torch.float)
+        self.sustained_push_torque = torch.zeros(self.num_envs, 3, device=self.device, dtype=torch.float)
+        self.sustained_push_timer = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
 
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
@@ -904,7 +933,7 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
-            
+
             # self.attach_camera(i, env_handle, anymal_handle)
 
             self.mass_params_tensor[i, :] = torch.from_numpy(mass_params).to(self.device).to(torch.float)
@@ -980,6 +1009,8 @@ class LeggedRobot(BaseTask):
         self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
 
         self.cfg.domain_rand.push_interval = np.ceil(self.cfg.domain_rand.push_interval_s / self.dt)
+        self.cfg.domain_rand.sustained_push_interval = np.ceil(self.cfg.domain_rand.sustained_push_interval_s / self.dt)
+        self.cfg.domain_rand.push_duration = np.ceil(self.cfg.domain_rand.push_duration_s / self.dt)
         self.cfg.domain_rand.push_end_effector_interval = np.ceil(self.cfg.domain_rand.push_end_effector_interval_s / self.dt)
 
     def _draw_height_samples(self):
