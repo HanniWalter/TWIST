@@ -40,7 +40,7 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         episode_length_s = 10
         
         randomize_start_pos = True
-        randomize_start_vel = True
+        randomize_start_vel = False
         randomize_start_yaw = False
         
         history_encoding = True
@@ -308,20 +308,20 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         max_contact_force = 100  # Forces above this value are penalized
         soft_torque_limit = 0.95
         torque_safety_limit = 0.9
-        root_height_diff_threshold = 0.5
+        root_height_diff_threshold = 0.2
 
     class domain_rand:
         domain_rand_general = True # manually set this, setting from parser does not work;
         
         randomize_gravity = (True and domain_rand_general)
         gravity_rand_interval_s = 4
-        gravity_range = (-0.15, 0.15)
+        gravity_range = (-0.1, 0.1)
         
         randomize_friction = (True and domain_rand_general)
-        friction_range = [0.05, 3.]
+        friction_range = [0.1, 2.]
         
         randomize_base_mass = (True and domain_rand_general)
-        added_mass_range = [-2.5, 2.5]
+        added_mass_range = [-3., 3]
         
         randomize_base_com = (True and domain_rand_general)
         added_com_range = [-0.05, 0.05]
@@ -333,25 +333,25 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         link_com_range = [-0.005, 0.005]
         
         push_robots = (True and domain_rand_general)
-        push_interval_s = 3.0
+        push_interval_s = 4.0
         max_push_vel_xy = 0.5
         max_push_ang_vel = 0.02
         
         # sustained push (force/torque)
         sustained_push_interval_s = 5.0
         push_duration_s = 1.0
-        max_push_force = 40.0
-        max_push_torque = 2.0
+        max_push_force = 0.0
+        max_push_torque = 0.0
 
         push_end_effector = (True and domain_rand_general)
         # push_end_effector = False
         push_end_effector_interval_s = 2
-        max_push_force_end_effector = 30.0
+        max_push_force_end_effector = 20.0
 
         randomize_motor = (True and domain_rand_general)
-        motor_strength_range = [0.7, 1.3]
-        stiffness_multiplier_range = [0.5, 1.5]
-        damping_multiplier_range = [0.5, 1.5]
+        motor_strength_range = [0.8, 1.2]
+        stiffness_multiplier_range = [0.9, 1.1]
+        damping_multiplier_range = [0.9, 1.1]
         
         randomize_joint_friction = (True and domain_rand_general)
         joint_friction_range = [0.0, 0.05]
@@ -363,12 +363,12 @@ class K1MimicPrivCfg(HumanoidMimicCfg):
         add_noise = True
         noise_increasing_steps = 3000
         class noise_scales:
-            dof_pos = 0.02
-            dof_vel = 0.5
-            lin_vel = 0.15
-            ang_vel = 0.3
-            gravity = 0.1
-            imu = 0.2
+            dof_pos = 0.01
+            dof_vel = 0.1
+            lin_vel = 0.1
+            ang_vel = 0.1
+            gravity = 0.05
+            imu = 0.1
         
     class motion(HumanoidMimicCfg.motion):
         motion_curriculum = True
@@ -509,7 +509,7 @@ class K1MimicStuRLCfg(K1MimicPrivCfg):
         max_contact_force = 100  # Forces above this value are penalized
         soft_torque_limit = 0.95
         torque_safety_limit = 0.9
-        root_height_diff_threshold = 0.5
+        root_height_diff_threshold = 0.2
 
 class K1MimicPrivCfgPPO(HumanoidMimicCfgPPO):
     seed = 1
@@ -738,7 +738,7 @@ class K1MimicStuRLCfg_future_keypoints(K1MimicPrivCfg):
         max_contact_force = 100  # Forces above this value are penalized
         soft_torque_limit = 0.95
         torque_safety_limit = 0.9
-        root_height_diff_threshold = 0.5
+        root_height_diff_threshold = 0.2
 
 class K1MimicStuRLCfgDAgger_future_keypoints(K1MimicStuRLCfg_future_keypoints):
     seed = 1
@@ -851,7 +851,7 @@ class K1MimicStuRLCfg_future(K1MimicPrivCfg):
             tracking_root_vel = 1.0
             tracking_keybody_pos = 2.5
 
-            feet_slip = -0.5
+            feet_slip = -0.1
             feet_contact_forces = -5e-4      
             feet_stumble = -1.25
             
@@ -880,7 +880,7 @@ class K1MimicStuRLCfg_future(K1MimicPrivCfg):
         max_contact_force = 100
         soft_torque_limit = 0.95
         torque_safety_limit = 0.9
-        root_height_diff_threshold = 0.5
+        root_height_diff_threshold = 0.2
 
 
 class K1MimicStuRLCfgDAgger_future(K1MimicStuRLCfg_future):
